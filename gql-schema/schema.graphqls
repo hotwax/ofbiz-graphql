@@ -1,0 +1,17 @@
+schema {
+    query: Query
+}
+
+type Query {
+    product(id : String) : Product
+}
+
+type Product {
+    productId: ID
+    productName: String
+    description: String
+    productTypeId : String
+    primaryProductCategoryId : String
+    isVirtual : String
+}       
+
