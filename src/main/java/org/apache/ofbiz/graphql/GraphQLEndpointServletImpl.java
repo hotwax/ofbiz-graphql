@@ -18,15 +18,28 @@
  *******************************************************************************/
 package org.apache.ofbiz.graphql;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+
 import javax.servlet.ServletException;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
+import javax.xml.parsers.ParserConfigurationException;
+import org.apache.ofbiz.base.component.ComponentConfig;
+import org.apache.ofbiz.base.component.ComponentException;
+import org.apache.ofbiz.base.util.Debug;
+import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.graphql.config.OFBizGraphQLObjectMapperConfigurer;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition;
+import org.w3c.dom.Element;
+import org.xml.sax.SAXException;
 import graphql.ExecutionResultImpl;
 import graphql.GraphQLError;
 import graphql.GraphqlErrorBuilder;
@@ -37,14 +50,17 @@ import graphql.servlet.SimpleGraphQLHttpServlet;
 
 @SuppressWarnings("serial")
 public class GraphQLEndpointServletImpl extends SimpleGraphQLHttpServlet {
-
+	
+	public static final String MODULE = GraphQLEndpointServletImpl.class.getName();
 	private static final String APPLICATION_GRAPHQL = "application/graphql";
 	private GraphQLConfiguration configuration;
 	private GraphQLObjectMapper mapper;
+	private Map<String, Element> graphQLSchemaElementMap = new HashMap<>();
 	
 	@Override
 	protected GraphQLConfiguration getConfiguration() {
 		mapper = GraphQLObjectMapper.newBuilder().withObjectMapperConfigurer(new OFBizGraphQLObjectMapperConfigurer()).build();
+		loadSchemaElements();
 		GraphQLSchemaDefinition schemaDef= new GraphQLSchemaDefinition();
 		configuration = GraphQLConfiguration.with(schemaDef.newDynamicSchema()).with(false).with(mapper).build();
 		return configuration;
@@ -97,6 +113,39 @@ public class GraphQLEndpointServletImpl extends SimpleGraphQLHttpServlet {
 			httpServletResponse.setHeader("Access-Control-Allow-Credentials", "true");
 			httpServletResponse.setHeader("Access-Control-Allow-Methods", "OPTIONS, POST, GET");
 		}
+	}
+	
+	/**
+	 * 
+	 */
+	private void loadSchemaElements() {
+
+		Collection<ComponentConfig> components = ComponentConfig.getAllComponents();
+		components.forEach(component -> {
+			String cName = component.getComponentName();
+			try {
+				String cBaseLocation = ComponentConfig.getRootLocation(cName);
+				File folder = new File(cBaseLocation);
+				if (folder.isDirectory() && folder.exists()) {
+					// Specifically Look for a file Named component-name.graphql.xml
+					String gqlSchemaFileName = cName + ".graphql.xml";
+					File graphqlSchemaFile = new File(folder + "/graphql-schema", gqlSchemaFileName);
+					if (graphqlSchemaFile.exists()) {
+						Debug.logInfo("Processing GraphQL Schema file " + gqlSchemaFileName, MODULE);
+						Element element = null;
+						try {
+							element = UtilXml.readXmlDocument(new FileInputStream(graphqlSchemaFile), true, "GraphQL Schema File", true).getDocumentElement();
+						} catch (SAXException | ParserConfigurationException | IOException e) {
+							Debug.logError(e, MODULE);
+						}
+						graphQLSchemaElementMap.put(gqlSchemaFileName, element);
+					}
+				}
+
+			} catch (ComponentException e) {
+				e.printStackTrace();
+			}
+		});
 	}
 
 }
