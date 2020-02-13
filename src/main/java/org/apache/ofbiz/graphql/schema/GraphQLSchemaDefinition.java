@@ -24,8 +24,12 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+
 import org.apache.ofbiz.base.util.FileUtil;
+import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.w3c.dom.Element;
 
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
@@ -42,6 +46,15 @@ import static graphql.schema.GraphQLObjectType.newObject;
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
 
 public class GraphQLSchemaDefinition {
+	
+	private Delegator delegator;
+	
+	public GraphQLSchemaDefinition(Delegator delegator, Map<String, Element> schemaMap) {
+		this.delegator = delegator;
+		schemaMap.forEach((k, v) -> {
+			
+		});
+	}
 	
 	
 	/**
