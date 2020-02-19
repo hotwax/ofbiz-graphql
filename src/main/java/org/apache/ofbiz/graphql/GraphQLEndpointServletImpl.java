@@ -32,14 +32,18 @@ import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.xml.parsers.ParserConfigurationException;
+
 import org.apache.ofbiz.base.component.ComponentConfig;
 import org.apache.ofbiz.base.component.ComponentException;
 import org.apache.ofbiz.base.util.Debug;
 import org.apache.ofbiz.base.util.UtilXml;
+import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.graphql.config.OFBizGraphQLObjectMapperConfigurer;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition;
+import org.apache.ofbiz.service.LocalDispatcher;
 import org.w3c.dom.Element;
 import org.xml.sax.SAXException;
+
 import graphql.ExecutionResultImpl;
 import graphql.GraphQLError;
 import graphql.GraphqlErrorBuilder;
@@ -61,7 +65,7 @@ public class GraphQLEndpointServletImpl extends SimpleGraphQLHttpServlet {
 	protected GraphQLConfiguration getConfiguration() {
 		mapper = GraphQLObjectMapper.newBuilder().withObjectMapperConfigurer(new OFBizGraphQLObjectMapperConfigurer()).build();
 		loadSchemaElements();
-		GraphQLSchemaDefinition schemaDef= new GraphQLSchemaDefinition();
+		GraphQLSchemaDefinition schemaDef= new GraphQLSchemaDefinition((Delegator)getServletContext().getAttribute("delegator"), (LocalDispatcher)getServletContext().getAttribute("dispatcher"), graphQLSchemaElementMap);
 		configuration = GraphQLConfiguration.with(schemaDef.newDynamicSchema()).with(false).with(mapper).build();
 		return configuration;
 	}

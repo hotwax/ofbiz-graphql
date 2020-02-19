@@ -18,6 +18,11 @@
  *******************************************************************************/
 package org.apache.ofbiz.graphql.schema;
 
+import static graphql.Scalars.GraphQLString;
+import static graphql.schema.GraphQLFieldDefinition.newFieldDefinition;
+import static graphql.schema.GraphQLObjectType.newObject;
+import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -29,6 +34,7 @@ import java.util.Map;
 import org.apache.ofbiz.base.util.FileUtil;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.apache.ofbiz.service.LocalDispatcher;
 import org.w3c.dom.Element;
 
 import graphql.schema.FieldCoordinates;
@@ -40,16 +46,13 @@ import graphql.schema.idl.RuntimeWiring;
 import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
-import static graphql.Scalars.GraphQLString;
-import static graphql.schema.GraphQLFieldDefinition.newFieldDefinition;
-import static graphql.schema.GraphQLObjectType.newObject;
-import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
 
 public class GraphQLSchemaDefinition {
 	
 	private Delegator delegator;
+	private LocalDispatcher dispatcher;
 	
-	public GraphQLSchemaDefinition(Delegator delegator, Map<String, Element> schemaMap) {
+	public GraphQLSchemaDefinition(Delegator delegator, LocalDispatcher dispatcher, Map<String, Element> schemaMap) {
 		this.delegator = delegator;
 		schemaMap.forEach((k, v) -> {
 			
