@@ -29,14 +29,20 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.ofbiz.base.util.FileUtil;
+import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
 import org.apache.ofbiz.service.LocalDispatcher;
 import org.w3c.dom.Element;
 
+import GraphQLSchemaDefinition.FieldDefinition;
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
 import graphql.schema.GraphQLCodeRegistry;
@@ -116,5 +122,31 @@ public class GraphQLSchemaDefinition {
 		build.type(newTypeWiring("Query").dataFetcher("product", new EntityDataFetcher()));
 		return build.build();
 	}
+	
+	private static abstract class AbstractGraphQLTypeDefinition {
+        String name;
+        String description;
+        String type;
+        abstract List<String> getDependentTypes();
+    }
+	
+	private static class ExtendObjectDefinition extends AbstractGraphQLTypeDefinition{
+        final Delegator delegator;
+        final LocalDispatcher dispatcher;
+        List<Element> extendObjectNodeList = new ArrayList<Element>();
+        String name, resolverField;
+        List<String> excludeFields = new ArrayList<>();
+        Map<String, String> resolverMap = new LinkedHashMap<>();
+        
+        ExtendObjectDefinition(Element node, Delegator delegator, LocalDispatcher dispatcher) {
+            this.delegator = delegator;
+            this.dispatcher = dispatcher;
+            this.extendObjectNodeList.add(node);
+            this.name = node.getAttribute("name");
+            List<? extends Element> elements = UtilXml.childElementList(node);
+            for (Element childNode : elements) {
+            }
+        }
+	}   
 
 }
