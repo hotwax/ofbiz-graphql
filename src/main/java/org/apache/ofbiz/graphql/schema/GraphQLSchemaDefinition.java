@@ -31,7 +31,6 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -42,7 +41,6 @@ import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
 import org.apache.ofbiz.service.LocalDispatcher;
 import org.w3c.dom.Element;
 
-import GraphQLSchemaDefinition.FieldDefinition;
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
 import graphql.schema.GraphQLCodeRegistry;
@@ -147,6 +145,12 @@ public class GraphQLSchemaDefinition {
             for (Element childNode : elements) {
             }
         }
+
+		@Override
+		List<String> getDependentTypes() {
+			// TODO Auto-generated method stub
+			return null;
+		}
 	}   
 
 }
