@@ -36,6 +36,7 @@ import javax.xml.parsers.ParserConfigurationException;
 import org.apache.ofbiz.base.component.ComponentConfig;
 import org.apache.ofbiz.base.component.ComponentException;
 import org.apache.ofbiz.base.util.Debug;
+import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.graphql.config.OFBizGraphQLObjectMapperConfigurer;
@@ -119,34 +120,35 @@ public class GraphQLEndpointServletImpl extends SimpleGraphQLHttpServlet {
 		}
 	}
 	
-	/**
-	 * 
-	 */
 	private void loadSchemaElements() {
-
 		Collection<ComponentConfig> components = ComponentConfig.getAllComponents();
 		components.forEach(component -> {
 			String cName = component.getComponentName();
 			try {
-				String cBaseLocation = ComponentConfig.getRootLocation(cName);
-				File folder = new File(cBaseLocation);
+				String loc = ComponentConfig.getRootLocation(cName) + "/graphql/schema";
+				File folder = new File(loc);
 				if (folder.isDirectory() && folder.exists()) {
-					// Specifically Look for a file Named component-name.graphql.xml
-					String gqlSchemaFileName = cName + ".graphql.xml";
-					File graphqlSchemaFile = new File(folder + "/graphql-schema", gqlSchemaFileName);
-					if (graphqlSchemaFile.exists()) {
-						Debug.logInfo("Processing GraphQL Schema file " + gqlSchemaFileName, MODULE);
+					File[] schemaFiles = folder.listFiles((dir, fileName) -> fileName.endsWith(".graphql.xml"));
+					for (File schemaFile : schemaFiles) {
+						Debug.logInfo("GraphQL schema file " + schemaFile.getName() + " was found in component " + cName, MODULE);
 						Element element = null;
 						try {
-							element = UtilXml.readXmlDocument(new FileInputStream(graphqlSchemaFile), true, "GraphQL Schema File", true).getDocumentElement();
+							element = UtilXml.readXmlDocument(new FileInputStream(schemaFile), true, "GraphQL Schema File", true).getDocumentElement();
+							String isEnabledStr = element.getAttribute("expose");
+							if (UtilValidate.isEmpty(isEnabledStr) || Boolean.parseBoolean(isEnabledStr)) {
+								Debug.logInfo("Processing GraphQL schema file " + schemaFile.getName() + " from component " + cName, MODULE);
+								graphQLSchemaElementMap.put(schemaFile.getName(), element);
+							}
 						} catch (SAXException | ParserConfigurationException | IOException e) {
-							Debug.logError(e, MODULE);
+							// TODO Auto-generated catch block
+							e.printStackTrace();
 						}
-						graphQLSchemaElementMap.put(gqlSchemaFileName, element);
 					}
+
 				}
 
 			} catch (ComponentException e) {
+				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		});
