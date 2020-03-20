@@ -14,7 +14,7 @@
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
- * under the License.
+ * under the License.aaaab	
  *******************************************************************************/
 package org.apache.ofbiz.graphql.schema;
 
@@ -30,48 +30,1048 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-
+import java.util.Set;
 import org.apache.ofbiz.base.util.FileUtil;
+import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
+import org.apache.ofbiz.entity.model.ModelEntity;
+import org.apache.ofbiz.entity.model.ModelField;
+import org.apache.ofbiz.graphql.fetcher.BaseDataFetcher;
+import org.apache.ofbiz.graphql.fetcher.EmptyDataFetcher;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.apache.ofbiz.graphql.fetcher.ServiceDataFetcher;
+import org.apache.ofbiz.service.GenericServiceException;
 import org.apache.ofbiz.service.LocalDispatcher;
+import org.apache.ofbiz.service.ModelParam;
+import org.apache.ofbiz.service.ModelService;
 import org.w3c.dom.Element;
-
+import graphql.TypeResolutionEnvironment;
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
 import graphql.schema.GraphQLCodeRegistry;
+import graphql.schema.GraphQLFieldDefinition;
+import graphql.schema.GraphQLInputObjectField;
+import graphql.schema.GraphQLInputObjectType;
+import graphql.schema.GraphQLInputType;
+import graphql.schema.GraphQLInterfaceType;
+import graphql.schema.GraphQLList;
+import graphql.schema.GraphQLNonNull;
 import graphql.schema.GraphQLObjectType;
+import graphql.schema.GraphQLOutputType;
+import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLSchema;
+import graphql.schema.GraphQLTypeReference;
+import graphql.schema.StaticDataFetcher;
+import graphql.schema.TypeResolver;
 import graphql.schema.idl.RuntimeWiring;
 import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
 
 public class GraphQLSchemaDefinition {
-	
+
 	private Delegator delegator;
 	private LocalDispatcher dispatcher;
-	
+	protected final Map<String, GraphQLInputType> schemaInputTypeMap = new HashMap<>();
+	protected static final Map<String, GraphQLInputType> graphQLInputTypeMap = new HashMap<>();
+	protected static Map<String, FieldDefinition> fieldDefMap = new HashMap<>();
+	protected static GraphQLInputObjectType paginationInputType;
+	protected static GraphQLInputObjectType operationInputType;
+	protected static GraphQLInputObjectType dateRangeInputType;
+	protected final ArrayList<String> schemaInputTypeNameList = new ArrayList<>();
+	protected final Map<String, String> queryRootFieldMap = new LinkedHashMap<>();
+	protected final Map<String, String> mutationRootFieldMap = new LinkedHashMap<>();
+	protected final String queryRootObjectTypeName = "QueryRootObjectType";
+	protected final String mutationRootObjectTypeName = "MutationRootObjectType";
+	protected Map<String, GraphQLTypeDefinition> allTypeDefMap = new LinkedHashMap<>();
+	protected static Map<String, ArgumentDefinition> argumentDefMap = new HashMap<>();
+	protected Map<String, ExtendObjectDefinition> extendObjectDefMap = new LinkedHashMap<>();
+	protected Map<String, InterfaceTypeDefinition> interfaceTypeDefMap = new LinkedHashMap<>();
+	protected static Map<String, Element> interfaceFetcherNodeMap = new HashMap<>();
+
+	// Type Maps
+	protected static final Map<String, GraphQLInterfaceType> graphQLInterfaceTypeMap = new HashMap<>();
+	protected static final Map<String, GraphQLOutputType> graphQLOutputTypeMap = new HashMap<>();
+	protected static final Map<String, GraphQLObjectType> graphQLObjectTypeMap = new HashMap<>();
+	protected static final Map<String, GraphQLFieldDefinition> graphQLFieldMap = new HashMap<>();
+	protected static final Map<String, GraphQLInputObjectType> graphQLInputObjectTypeMap = new HashMap<>();
+	protected static final Map<String, GraphQLInputObjectField> graphQLInputObjectFieldMap = new HashMap<>();
+	protected static final Map<String, GraphQLArgument> graphQLArgumentMap = new HashMap<>();
+	protected static final Map<String, GraphQLArgument> graphQLDirectiveArgumentMap = new LinkedHashMap<>();
+	protected static final Map<String, GraphQLTypeReference> graphQLTypeReferenceMap = new HashMap<>();
+
+	protected LinkedList<GraphQLTypeDefinition> allTypeDefSortedList = new LinkedList<>();
+	protected Map<String, GraphQLTypeDefinition> requiredTypeDefMap = new LinkedHashMap<>();
+	protected static GraphQLInputObjectField clientMutationIdInputField;
+
+	protected static Set<String> interfaceResolverTypeSet = new HashSet<>();
+
+	protected static final String KEY_SPLITTER = "__";
+	protected static final String NON_NULL_SUFFIX = "_1";
+	protected static final String IS_LIST_SUFFIX = "_2";
+	protected static final String LIST_ITEM_NON_NULL_SUFFIX = "_3";
+	protected static final String REQUIRED_SUFFIX = "_a";
+
+	static {
+		createPredefinedGraphQLTypes();
+	}
+
+	private static void createPredefinedGraphQLTypes() {
+		// Add default GraphQLScalarType
+		for (Map.Entry<String, GraphQLScalarType> entry : GraphQLSchemaUtil.graphQLScalarTypes.entrySet()) {
+			graphQLInputTypeMap.put(entry.getKey(), entry.getValue());
+			graphQLOutputTypeMap.put(entry.getKey(), entry.getValue());
+		}
+
+		clientMutationIdInputField = GraphQLInputObjectField.newInputObjectField().name("clientMutationId")
+				.type(GraphQLString).description("A unique identifier for the client performing the mutation.").build();
+		graphQLInputObjectFieldMap.put("clientMutationId", clientMutationIdInputField);
+	}
+
+	static class TreeNode<T> {
+		T data;
+		public final List<TreeNode<T>> children = new LinkedList<TreeNode<T>>();
+
+		public TreeNode(T data) {
+			this.data = data;
+		}
+	}
+
+	static class EnumValue {
+		String name, value, description, depreciationReason;
+
+		EnumValue(Element node) {
+			this.name = node.getAttribute("node");
+			this.value = node.getAttribute("value");
+			List<? extends Element> elements = UtilXml.childElementList(node);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "depreciation-reason":
+					this.depreciationReason = childNode.getTextContent();
+					break;
+				}
+			}
+		}
+	}
+
+	static class EnumTypeDefinition extends GraphQLTypeDefinition {
+		List<EnumValue> valueList = new LinkedList<>();
+
+		EnumTypeDefinition(Element node) {
+			this.name = node.getAttribute("name");
+			this.type = "enum";
+			List<? extends Element> elements = UtilXml.childElementList(node);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "enum-value":
+					valueList.add(new EnumValue(childNode));
+					break;
+				}
+			}
+		}
+
+		@Override
+		List<String> getDependentTypes() {
+			return new LinkedList<String>();
+		}
+	}
+
+	static class ExtendObjectDefinition {
+		final Delegator delegator;
+		final LocalDispatcher dispatcher;
+		List<Element> extendObjectNodeList = new ArrayList<Element>();
+		String name, resolverField;
+
+		List<String> interfaceList = new LinkedList<>();
+		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
+		List<String> excludeFields = new ArrayList<>();
+		Map<String, String> resolverMap = new LinkedHashMap<>();
+
+		boolean convertToInterface = false;
+
+		ExtendObjectDefinition(Element node, Delegator delegator, LocalDispatcher dispatcher) {
+			this.delegator = delegator;
+			this.dispatcher = dispatcher;
+			this.extendObjectNodeList.add(node);
+			this.name = node.getAttribute("name");
+			List<? extends Element> elements = UtilXml.childElementList(node);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "interface":
+					interfaceList.add(childNode.getAttribute("name"));
+					break;
+				case "field":
+					fieldDefMap.put(childNode.getAttribute("name"),
+							new FieldDefinition(delegator, dispatcher, childNode));
+					break;
+				case "exclude-field":
+					excludeFields.add(childNode.getAttribute("name"));
+					break;
+				case "convert-to-interface":
+					convertToInterface = true;
+					resolverField = childNode.getAttribute("resolver-field");
+					break;
+				}
+			}
+		}
+
+		ExtendObjectDefinition merge(ExtendObjectDefinition other) {
+			extendObjectNodeList.addAll(other.extendObjectNodeList);
+			resolverField = resolverField != null ? resolverField : other.resolverField;
+			interfaceList.addAll(other.interfaceList);
+			fieldDefMap.putAll(other.fieldDefMap);
+			excludeFields.addAll(other.excludeFields);
+			resolverMap.putAll(other.resolverMap);
+			convertToInterface = convertToInterface ? convertToInterface : other.convertToInterface;
+			return this;
+		}
+
+	}
+
+	static class UnionTypeDefinition extends GraphQLTypeDefinition {
+		String typeResolver;
+		List<String> typeList = new LinkedList<>();
+
+		UnionTypeDefinition(Element node) {
+			this.name = node.getAttribute("name");
+			this.type = "union";
+			this.typeResolver = node.getAttribute("type-resolver");
+			List<? extends Element> elements = UtilXml.childElementList(node);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "type":
+					typeList.add(childNode.getAttribute("name"));
+					break;
+				}
+			}
+		}
+
+		@Override
+		List<String> getDependentTypes() {
+			return typeList;
+		}
+	}
+
 	public GraphQLSchemaDefinition(Delegator delegator, LocalDispatcher dispatcher, Map<String, Element> schemaMap) {
 		this.delegator = delegator;
+		this.dispatcher = dispatcher;
+
+		GraphQLSchemaUtil.createObjectTypeNodeForAllEntities(delegator, dispatcher, allTypeDefMap);
+
 		schemaMap.forEach((k, v) -> {
-			
+			Element schemaElement = v;
+			List<? extends Element> elements = UtilXml.childElementList(schemaElement, "interface-fetcher");
+			for (Element interfaceFetcherNode : elements) {
+				interfaceFetcherNodeMap.put(interfaceFetcherNode.getAttribute("name"), interfaceFetcherNode);
+			}
+
 		});
+
+		schemaMap.forEach((k, v) -> {
+			Element schemaElement = v;
+			String rootFieldName = schemaElement.getAttribute("name");
+			String rootQueryTypeName = schemaElement.getAttribute("query");
+			String rootMutationTypeName = schemaElement.getAttribute("mutation");
+			if (rootQueryTypeName != null)
+				queryRootFieldMap.put(rootFieldName, rootQueryTypeName);
+			if (rootMutationTypeName != null)
+				mutationRootFieldMap.put(rootFieldName, rootMutationTypeName);
+
+			List<? extends Element> elements = UtilXml.childElementList(schemaElement);
+			for (Element element : elements) {
+				String nodeName = element.getNodeName();
+				switch (nodeName) {
+				case "input-type":
+					schemaInputTypeNameList.add(element.getAttribute("name"));
+					break;
+				case "interface":
+					InterfaceTypeDefinition interfaceTypeDef = new InterfaceTypeDefinition(element, delegator,
+							dispatcher);
+					allTypeDefMap.put(element.getAttribute("name"), interfaceTypeDef);
+					interfaceTypeDefMap.put(element.getAttribute("name"), interfaceTypeDef);
+					break;
+				case "object":
+					allTypeDefMap.put(element.getAttribute("name"),
+							new ObjectTypeDefinition(element, delegator, dispatcher));
+					break;
+				case "union":
+					allTypeDefMap.put(element.getAttribute("name"), new UnionTypeDefinition(element));
+					break;
+				case "enum":
+					allTypeDefMap.put(element.getAttribute("name"), new EnumTypeDefinition(element));
+					break;
+				case "extend-object":
+					extendObjectDefMap.put(element.getAttribute("name"), mergeExtendObjectDef(extendObjectDefMap,
+							new ExtendObjectDefinition(element, delegator, dispatcher)));
+					break;
+				}
+			}
+		});
+		createRootObjectTypeDef(queryRootObjectTypeName, queryRootFieldMap);
+		createRootObjectTypeDef(mutationRootObjectTypeName, mutationRootFieldMap);
+		updateAllTypeDefMap();
 	}
-	
-	
+
+	private void updateAllTypeDefMap() {
+
+		// Extend object which convert to interface first
+		for (Map.Entry<String, ExtendObjectDefinition> entry : extendObjectDefMap.entrySet()) {
+			ExtendObjectDefinition extendObjectDef = (ExtendObjectDefinition) entry.getValue();
+			if (!extendObjectDef.convertToInterface)
+				continue;
+
+			String name = entry.getKey();
+			ObjectTypeDefinition objectTypeDef = (ObjectTypeDefinition) allTypeDefMap.get(name);
+			if (objectTypeDef == null)
+				throw new IllegalArgumentException("ObjectTypeDefinition [${name}] not found to extend");
+
+			if (interfaceTypeDefMap.containsKey(name))
+				throw new IllegalArgumentException("Interface [${name}] to be extended already exists");
+
+			InterfaceTypeDefinition interfaceTypeDef = new InterfaceTypeDefinition(objectTypeDef, extendObjectDef,
+					delegator);
+			allTypeDefMap.put(interfaceTypeDef.name, interfaceTypeDef);
+			interfaceTypeDefMap.put(interfaceTypeDef.name, interfaceTypeDef);
+
+			objectTypeDef.extend(extendObjectDef, allTypeDefMap);
+			// Interface need the object to do resolve
+			requiredTypeDefMap.put(objectTypeDef.name, objectTypeDef);
+		}
+
+		// Extend object
+		for (Map.Entry<String, ExtendObjectDefinition> entry : extendObjectDefMap.entrySet()) {
+			ExtendObjectDefinition extendObjectDef = (ExtendObjectDefinition) entry.getValue();
+			if (extendObjectDef.convertToInterface)
+				continue;
+
+			String name = entry.getKey();
+			ObjectTypeDefinition objectTypeDef = (ObjectTypeDefinition) allTypeDefMap.get(name);
+			if (objectTypeDef == null)
+				throw new IllegalArgumentException("ObjectTypeDefinition [" + name + "] not found to extend");
+
+			objectTypeDef.extend(extendObjectDef, allTypeDefMap);
+		}
+
+	}
+
+	private static ExtendObjectDefinition mergeExtendObjectDef(Map<String, ExtendObjectDefinition> extendObjectDefMap,
+			ExtendObjectDefinition extendObjectDef) {
+		ExtendObjectDefinition eoDef = extendObjectDefMap.get(extendObjectDef.name);
+		if (eoDef == null)
+			return extendObjectDef;
+		return eoDef.merge(extendObjectDef);
+	}
+
+	static FieldDefinition getCachedFieldDefinition(String name, String rawTypeName, String nonNull, String isList,
+			String listItemNonNull) {
+		return fieldDefMap.get(getFieldKey(name, rawTypeName, nonNull, isList, listItemNonNull));
+	}
+
+	protected static String getFieldKey(String name, String rawTypeName, String nonNull, String isList,
+			String listItemNonNull) {
+		String fieldKey = name + KEY_SPLITTER + rawTypeName;
+		if ("true".equals(nonNull))
+			fieldKey = fieldKey + NON_NULL_SUFFIX;
+		if ("true".equals(isList)) {
+			fieldKey = fieldKey + IS_LIST_SUFFIX;
+			if ("true".equals(listItemNonNull))
+				fieldKey = fieldKey + LIST_ITEM_NON_NULL_SUFFIX;
+		}
+		return fieldKey;
+	}
+
+	private void createRootObjectTypeDef(String rootObjectTypeName, Map<String, String> rootFieldMap) {
+		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
+		for (Map.Entry<String, String> entry : rootFieldMap.entrySet()) {
+			String fieldName = entry.getKey();
+			String fieldTypeName = entry.getValue();
+			// Map<String, String> fieldPropertyMap = [nonNull: "true"]
+			Map<String, String> fieldPropertyMap = new HashMap<>();
+			fieldPropertyMap.put("nonNull", "true");
+			FieldDefinition fieldDef = getCachedFieldDefinition(fieldName, fieldTypeName,
+					fieldPropertyMap.get("nonNull"), "false", "false");
+			if (fieldDef == null) {
+				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldTypeName, fieldPropertyMap);
+				// fieldDef = new FieldDefinition(ecf, fieldName, fieldTypeName,
+				// fieldPropertyMap)
+				fieldDef.setDataFetcher(new EmptyDataFetcher(fieldDef));
+				putCachedFieldDefinition(fieldDef);
+			}
+			fieldDefMap.put(fieldName, fieldDef);
+		}
+
+		if (fieldDefMap.size() == 0) {
+			Map<String, String> fieldPropertyMap = new HashMap<>();
+			fieldPropertyMap.put("nonNull", "false");
+			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, "empty", "String", fieldPropertyMap);
+			fieldDefMap.put("empty", fieldDef);
+		}
+		ObjectTypeDefinition objectTypeDef = new ObjectTypeDefinition(delegator, dispatcher, rootObjectTypeName, "",
+				new ArrayList<String>(), fieldDefMap);
+		allTypeDefMap.put(rootObjectTypeName, objectTypeDef);
+	}
+
+	protected static void putCachedFieldDefinition(FieldDefinition fieldDef) {
+		String fieldKey = getFieldKey(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
+				fieldDef.listItemNonNull);
+		if (fieldDefMap.get(fieldKey) != null)
+			throw new IllegalArgumentException(
+					"FieldDefinition [${fieldDef.name} - ${fieldDef.type}] already exists in cache");
+		fieldDefMap.put(fieldKey, fieldDef);
+	}
+
+	public GraphQLSchemaDefinition() {
+
+	}
+
+	static class InterfaceTypeDefinition extends GraphQLTypeDefinition {
+		Delegator delegator;
+		LocalDispatcher dispatcher;
+		String convertFromObjectTypeName;
+
+		String typeResolver;
+		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
+		String resolverField;
+		Map<String, String> resolverMap = new LinkedHashMap<>();
+		String defaultResolvedTypeName;
+
+		InterfaceTypeDefinition(Element node, Delegator delegator, LocalDispatcher dispatcher) {
+			this.delegator = delegator;
+			this.dispatcher = dispatcher;
+			this.name = node.getAttribute("name");
+			this.type = "interface";
+			this.typeResolver = node.getAttribute("type-resolver");
+			List<? extends Element> elements = UtilXml.childElementList(node);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "field":
+					fieldDefMap.put(childNode.getAttribute("name"),
+							new FieldDefinition(delegator, dispatcher, childNode));
+					break;
+				}
+			}
+		}
+
+		InterfaceTypeDefinition(ObjectTypeDefinition objectTypeDef, ExtendObjectDefinition extendObjectDef,
+				Delegator delegator) {
+			this.convertFromObjectTypeName = objectTypeDef.name;
+			this.delegator = delegator;
+			this.name = objectTypeDef.name + "Interface";
+			this.type = "interface";
+			this.defaultResolvedTypeName = objectTypeDef.name;
+			this.resolverField = extendObjectDef.resolverField;
+			this.resolverMap.putAll(extendObjectDef.resolverMap);
+
+			fieldDefMap.putAll(objectTypeDef.fieldDefMap);
+
+			for (Element extendObjectNode : extendObjectDef.extendObjectNodeList) {
+				List<? extends Element> elements = UtilXml.childElementList(extendObjectNode, "field");
+				for (Element fieldNode : elements) {
+					GraphQLSchemaUtil.mergeFieldDefinition(fieldNode, fieldDefMap, delegator, dispatcher);
+				}
+			}
+
+			for (String excludeFieldName : extendObjectDef.excludeFields)
+				fieldDefMap.remove(excludeFieldName);
+
+			// Make object type that interface convert from extends interface automatically.
+			objectTypeDef.interfaceList.add(name);
+		}
+
+		public void addResolver(String resolverValue, String resolverType) {
+			resolverMap.put(resolverValue, resolverType);
+		}
+
+		public List<FieldDefinition> getFieldList() {
+			List<FieldDefinition> fieldList = new LinkedList<>();
+			for (Map.Entry<String, FieldDefinition> entry : fieldDefMap.entrySet()) {
+				fieldList.add(entry.getValue());
+			}
+
+			return fieldList;
+		}
+
+		@Override
+		List<String> getDependentTypes() {
+			List<String> typeList = new LinkedList<>();
+			for (Map.Entry<String, FieldDefinition> entry : fieldDefMap.entrySet())
+				typeList.add(((FieldDefinition) entry.getValue()).type);
+			return typeList;
+		}
+	}
+
+	static abstract class GraphQLTypeDefinition {
+		String name, description, type;
+
+		abstract List<String> getDependentTypes();
+	}
+
+	static class ObjectTypeDefinition extends GraphQLTypeDefinition {
+		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
+		private Delegator delegator;
+		private LocalDispatcher dispatcher;
+		List<String> interfaceList = new LinkedList<>();
+		Map<String, InterfaceTypeDefinition> interfacesMap;
+
+		ObjectTypeDefinition(Element element, Delegator delegator, LocalDispatcher dispatcher) {
+			this.delegator = delegator;
+			this.dispatcher = dispatcher;
+			this.name = element.getAttribute("name");
+			this.type = "object";
+			List<? extends Element> objectElements = UtilXml.childElementList(element);
+			for (Element childNode : objectElements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "interface":
+					interfaceList.add(childNode.getAttribute("name"));
+					break;
+				case "field":
+					fieldDefMap.put(childNode.getAttribute("name"),
+							new FieldDefinition(delegator, dispatcher, childNode));
+					break;
+				}
+			}
+		}
+
+		ObjectTypeDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String description,
+				List<String> interfaceList, Map<String, FieldDefinition> fieldDefMap) {
+			this.name = name;
+			this.description = description;
+			this.type = "object";
+			this.fieldDefMap.putAll(fieldDefMap);
+		}
+
+		List<FieldDefinition> getFieldList() {
+			List<FieldDefinition> fieldList = new LinkedList<>();
+			for (Map.Entry<String, FieldDefinition> entry : fieldDefMap.entrySet())
+				fieldList.add((FieldDefinition) entry.getValue());
+			return fieldList;
+		}
+
+		@Override
+		List<String> getDependentTypes() {
+			List<String> typeList = new LinkedList<>();
+			for (String interfaceTypeName : interfaceList)
+				typeList.add(interfaceTypeName);
+			for (Map.Entry<String, FieldDefinition> entry : fieldDefMap.entrySet())
+				typeList.add(((FieldDefinition) entry.getValue()).type);
+
+			return typeList;
+		}
+
+		void extend(ExtendObjectDefinition extendObjectDef, Map<String, GraphQLTypeDefinition> allTypeDefMap) {
+			for (Element extendObjectNode : extendObjectDef.extendObjectNodeList) {
+				List<? extends Element> objectElements = UtilXml.childElementList(extendObjectNode, "interface");
+				for (Element childNode : objectElements) {
+					String interfaceDef = childNode.getAttribute("name");
+					GraphQLTypeDefinition interfaceTypeDef = allTypeDefMap.get(interfaceDef);
+					if (interfaceTypeDef == null)
+						throw new IllegalArgumentException("Extend object " + extendObjectDef.name
+								+ ", but interface definition [" + interfaceDef + "] not found");
+					if (!(interfaceTypeDef instanceof InterfaceTypeDefinition))
+						throw new IllegalArgumentException(
+								"Extend object ${extendObjectDef.name}, but interface definition [${childNode.attribute('name')}] is not instance of InterfaceTypeDefinition");
+					extendInterface((InterfaceTypeDefinition) interfaceTypeDef, childNode);
+				}
+			}
+
+			for (Element extendObjectNode : extendObjectDef.extendObjectNodeList) {
+				List<? extends Element> objectElements = UtilXml.childElementList(extendObjectNode, "field");
+				for (Element childNode : objectElements) {
+					GraphQLSchemaUtil.mergeFieldDefinition(childNode, fieldDefMap, delegator, dispatcher);
+				}
+			}
+
+			for (String excludeFieldName : extendObjectDef.excludeFields)
+				fieldDefMap.remove(excludeFieldName);
+		}
+
+		private void extendInterface(InterfaceTypeDefinition interfaceTypeDefinition, Element interfaceNode) {
+			for (Map.Entry<String, FieldDefinition> entry : interfaceTypeDefinition.fieldDefMap.entrySet()) {
+				// Already use interface field.
+				fieldDefMap.put(entry.getKey(), entry.getValue());
+			}
+			interfaceTypeDefinition.addResolver(interfaceNode.getAttribute("resolver-value"), name);
+			if (!interfaceList.contains(interfaceTypeDefinition.name))
+				interfaceList.add(interfaceTypeDefinition.name);
+		}
+
+	}
+
+	static String getArgumentTypeName(String type, String fieldIsList) {
+		if (!"true".equals(fieldIsList))
+			return type;
+		if (GraphQLSchemaUtil.graphQLStringTypes.contains(type) || GraphQLSchemaUtil.graphQLNumericTypes.contains(type)
+				|| GraphQLSchemaUtil.graphQLDateTypes.contains(type))
+			return operationInputType.getName();
+		if (GraphQLSchemaUtil.graphQLDateTypes.contains(type))
+			return dateRangeInputType.getName();
+
+		return type;
+	}
+
+	static String getArgumentKey(String name, String type) {
+		return getArgumentKey(name, type, null);
+	}
+
+	static String getArgumentKey(String name, String type, String required) {
+		String argumentKey = name + KEY_SPLITTER + type;
+		if ("true".equals(required))
+			argumentKey = argumentKey + REQUIRED_SUFFIX;
+		return argumentKey;
+	}
+
+	static void putCachedArgumentDefinition(ArgumentDefinition argDef) {
+		if (!(GraphQLSchemaUtil.graphQLScalarTypes.containsKey(argDef.getType())
+				|| dateRangeInputType.getName().equals(argDef.getType())
+				|| operationInputType.getName().equals(argDef.getType())))
+			return;
+
+		String argumentKey = getArgumentKey(argDef.name, argDef.getType(), argDef.getRequired());
+		if (argumentDefMap.get(argumentKey) != null)
+			throw new IllegalArgumentException(
+					"ArgumentDefinition [" + argDef.name + " - " + argDef.getType() + "] already exists in cache");
+		argumentDefMap.put(argumentKey, argDef);
+	}
+
+	public static class FieldDefinition implements Cloneable {
+
+		public String toString() {
+			return "FieldDefinition{name=" + this.name + ", type=" + this.type + ", nonNull=" + this.nonNull
+					+ ", isList=" + this.isList + ", " + "listItemNonNull=" + this.listItemNonNull + ", "
+					+ "isMutation=" + this.isMutation + ", argumentDefMap=" + this.argumentDefMap + "}";
+		}
+
+		String name, type, description, depreciationReason;
+		String nonNull, isList, listItemNonNull;
+		BaseDataFetcher dataFetcher;
+		Delegator delegator;
+		LocalDispatcher dispatcher;
+		String requireAuthentication;
+
+		public String getRequireAuthentication() {
+			return requireAuthentication;
+		}
+
+		public String getType() {
+			return type;
+		}
+
+		public void setDataFetcher(BaseDataFetcher dataFetcher) {
+			this.dataFetcher = dataFetcher;
+		}
+
+		public String getNonNull() {
+			return nonNull;
+		}
+
+		public String getIsList() {
+			return isList;
+		}
+
+		boolean isMutation = false;
+
+		public boolean isMutation() {
+			return isMutation;
+		}
+
+		String preDataFetcher, postDataFetcher;
+		Map<String, ArgumentDefinition> argumentDefMap = new LinkedHashMap<>();
+
+		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type) {
+			this(delegator, dispatcher, name, type, new HashMap<>(), null, new ArrayList<>());
+		}
+
+		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+				Map<String, String> fieldPropertyMap) {
+			this(delegator, dispatcher, name, type, fieldPropertyMap, null, new ArrayList<>());
+		}
+
+		// This constructor used by auto creation of master-detail field
+		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+				Map<String, String> fieldPropertyMap, List<String> excludedFields) {
+			this(delegator, dispatcher, name, type, fieldPropertyMap, null, excludedFields);
+		}
+
+		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+				Map<String, String> fieldPropertyMap, BaseDataFetcher dataFetcher, List<String> excludedArguments) {
+			this.name = name;
+			this.type = type;
+			this.dataFetcher = dataFetcher;
+			this.nonNull = fieldPropertyMap.get("nonNull") != null ? fieldPropertyMap.get("nonNull") : "false";
+			this.isList = fieldPropertyMap.get("isList") != null ? fieldPropertyMap.get("isList") : "false";
+			this.listItemNonNull = fieldPropertyMap.get("listItemNonNull") != null
+					? fieldPropertyMap.get("listItemNonNull")
+					: "false";
+			this.description = fieldPropertyMap.get("description");
+		}
+
+		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, Element node) {
+			this.delegator = delegator;
+			this.dispatcher = dispatcher;
+			this.name = node.getAttribute("name");
+			this.type = node.getAttribute("type");
+			this.description = node.getAttribute("description");
+			this.nonNull = node.getAttribute("non-null") != null ? node.getAttribute("non-null") : "false";
+			this.isList = node.getAttribute("is-list") != null ? node.getAttribute("is-list") : "false";
+			this.listItemNonNull = node.getAttribute("list-item-non-null") != null
+					? node.getAttribute("list-item-non-null")
+					: "false";
+			this.isMutation = "mutation".equals(node.getAttribute("for"));
+
+			String dataFetcherType = "";
+			Element dataFetcherNode = null;
+			List<? extends Element> objectElements = UtilXml.childElementList(node);
+			for (Element childNode : objectElements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					this.description = childNode.getTextContent();
+					break;
+				case "argument":
+					String argTypeName = getArgumentTypeName(childNode.getAttribute("type"), this.isList);
+					ArgumentDefinition argDef = getCachedArgumentDefinition(childNode.getAttribute("name"), argTypeName,
+							childNode.getAttribute("required"));
+					if (argDef == null) {
+						argDef = new ArgumentDefinition(childNode, this);
+						putCachedArgumentDefinition(argDef);
+					}
+					mergeArgument(argDef);
+					break;
+				case "service-fetcher":
+					dataFetcherType = "service";
+					dataFetcherNode = childNode;
+					this.dataFetcher = new ServiceDataFetcher(childNode, this, delegator, dispatcher);
+					break;
+				case "interface-fetcher":
+					dataFetcherType = "interface";
+					dataFetcherNode = childNode;
+					String refName = childNode.getAttribute("ref") != null ? childNode.getAttribute("ref")
+							: "NOT_EXIST";
+					Element refNode = interfaceFetcherNodeMap.get(refName);
+					// TO-DO this.dataFetcher = new InterfaceDataFetcher(childNode, refNode, this,
+					// delegator, dispatcher);
+					break;
+				case "entity-fetcher":
+					dataFetcherType = "entity";
+					dataFetcherNode = childNode;
+					this.dataFetcher = new EntityDataFetcher(delegator, childNode, this);
+					break;
+				case "empty-fetcher":
+					dataFetcherType = "empty";
+					dataFetcherNode = childNode;
+					this.dataFetcher = new EmptyDataFetcher(childNode, this);
+					break;
+				}
+			}
+
+			Map<String, String> keyMap = getDataFetcherKeyMap(dataFetcherNode, delegator);
+			switch (dataFetcherType) {
+			case "entity":
+				break;
+			case "service":
+				if (isMutation)
+					addInputArgument();
+				else
+					addQueryAutoArguments(dataFetcherNode, keyMap, dispatcher);
+				break;
+			}
+		}
+
+		void mergeArgument(ArgumentDefinition argumentDef) {
+			mergeArgument(argumentDef.name, argumentDef.attributeMap);
+		}
+
+		ArgumentDefinition mergeArgument(final String argumentName, Map<String, String> attributeMap) {
+			ArgumentDefinition baseArgumentDef = argumentDefMap.get(argumentName);
+			if (baseArgumentDef == null) {
+				baseArgumentDef = getCachedArgumentDefinition(argumentName, attributeMap.get("type"),
+						attributeMap.get("required"));
+				if (baseArgumentDef == null) {
+					baseArgumentDef = new ArgumentDefinition(this, argumentName, attributeMap);
+					putCachedArgumentDefinition(baseArgumentDef);
+				}
+				argumentDefMap.put(argumentName, baseArgumentDef);
+			} else {
+				baseArgumentDef.attributeMap.putAll(attributeMap);
+			}
+			return baseArgumentDef;
+		}
+
+		private static Map<String, String> getDataFetcherKeyMap(Element fetcherNode, Delegator delegator) {
+			Map<String, String> keyMap = new HashMap<>(1);
+			if (fetcherNode == null)
+				return keyMap;
+
+			List<? extends Element> elements = UtilXml.childElementList(fetcherNode, "key-map");
+			if (fetcherNode.getNodeName().equals("entity-fetcher")) {
+				String entityName = fetcherNode.getAttribute("entity-name");
+				ModelEntity entity = delegator.getModelEntity(entityName);
+				for (Element keyMapNode : elements) {
+					String fieldName = keyMapNode.getAttribute("field-name");
+					String relFn = keyMapNode.getAttribute("related");
+					if (relFn == null) {
+						if (entity.isField(fieldName)) {
+							relFn = fieldName;
+						} else {
+							if (entity.getPkFieldNames().size() == 1)
+								relFn = entity.getPkFieldNames().get(0);
+						}
+					}
+					if (relFn == null)
+						throw new IllegalArgumentException(
+								"The key-map.@related of Entity ${entityName} should be specified");
+					keyMap.put(fieldName, relFn);
+				}
+
+			} else {
+				for (Element keyMapNode : elements)
+					keyMap.put(keyMapNode.getAttribute("field-name"),
+							keyMapNode.getAttribute("related") != null ? keyMapNode.getAttribute("related")
+									: keyMapNode.getAttribute("field-name"));
+			}
+			return keyMap;
+
+		}
+
+		private void addQueryAutoArguments(Element serviceFetcherNode, Map<String, String> keyMap,
+				LocalDispatcher dispatcher) {
+			if (isMutation)
+				return;
+			String serviceName = serviceFetcherNode.getAttribute("service");
+
+			try {
+				ModelService service = dispatcher.getDispatchContext().getModelService(serviceName);
+				if (service == null)
+					throw new IllegalArgumentException(
+							"Service [" + serviceName + "] for field [" + name + "] not found");
+
+				for (ModelParam modelParam : service.getInModelParamList()) {
+
+					String paramName = modelParam.getName();
+					String paramType = modelParam.getType();
+					boolean optional = modelParam.isOptional();
+					if (modelParam.internal) {
+						continue;
+					}
+					if (keyMap.values().contains(paramName))
+						continue;
+					if (paramType.equals("graphql.schema.DataFetchingEnvironment"))
+						continue; // ignored
+					// TODO: get description from parameter description node
+					String paramDescription = "";
+					boolean argIsList = false;
+					String argType;
+					switch (paramType) {
+					case "List":
+						argIsList = true;
+						argType = GraphQLSchemaUtil.camelCaseToUpperCamel(this.name) + "_" + paramName;
+						break;
+					case "Map":
+						argType = GraphQLSchemaUtil.camelCaseToUpperCamel(this.name) + "_" + paramName;
+						break;
+					default:
+						argType = GraphQLSchemaUtil.javaTypeGraphQLMap.get(paramType);
+						break;
+					}
+					if (argType == null) {
+						throw new IllegalArgumentException(
+								"Parameter [" + paramName + "] and paramType [" + paramType + "] can't be mapped");
+					}
+
+					ArgumentDefinition argumentDef = getCachedArgumentDefinition(paramName, argType,
+							Boolean.toString(!optional));
+					if (argumentDef == null) {
+						argumentDef = new ArgumentDefinition(this, paramName, argType, Boolean.toString(!optional),
+								argIsList, null, paramDescription);
+						putCachedArgumentDefinition(argumentDef);
+					}
+					argumentDefMap.put(paramName, argumentDef);
+				}
+			} catch (GenericServiceException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+		}
+
+		List<ArgumentDefinition> getArgumentList() {
+			List<ArgumentDefinition> argumentList = new LinkedList<>();
+			for (Map.Entry<String, ArgumentDefinition> entry : argumentDefMap.entrySet()) {
+				argumentList.add(entry.getValue());
+			}
+			return argumentList;
+		}
+
+		private void addInputArgument() {
+			if (!isMutation)
+				return;
+
+			String inputTypeName = GraphQLSchemaUtil.camelCaseToUpperCamel(this.name) + "Input";
+			ArgumentDefinition inputArgDef = new ArgumentDefinition(this, "input", inputTypeName, "true", null, "");
+			argumentDefMap.put("input", inputArgDef);
+		}
+	}
+
+	static ArgumentDefinition getCachedArgumentDefinition(String name, String type, String required) {
+		return argumentDefMap.get(getArgumentKey(name, type, required));
+	}
+
+	static class AutoArgumentsDefinition {
+		String entityName, include, required;
+		List<String> excludes = new LinkedList<>();
+
+		AutoArgumentsDefinition(Element node) {
+			this.entityName = node.getAttribute("entity-name");
+			this.include = node.getAttribute("include") != null ? node.getAttribute("include") : "all";
+			this.required = node.getAttribute("required") != null ? node.getAttribute("required") : "false";
+			List<? extends Element> elements = UtilXml.childElementList(node, "exclude");
+			for (Element childNode : elements) {
+				excludes.add(childNode.getAttribute("field-name"));
+			}
+		}
+	}
+
+	static class ArgumentDefinition implements Cloneable {
+		String name;
+		boolean isList = false;
+		Map<String, String> attributeMap = new LinkedHashMap<>();;
+
+		ArgumentDefinition(Element ele, FieldDefinition fieldDef) {
+			this.name = ele.getAttribute("name");
+			if (ele.getAttribute("type") == "List")
+				this.isList = true;
+			attributeMap.put("type", ele.getAttribute("type"));
+			attributeMap.put("required", ele.getAttribute("required") != null ? ele.getAttribute("required") : "false");
+			attributeMap.put("defaultValue", ele.getAttribute("default-value"));
+			List<? extends Element> elements = UtilXml.childElementList(ele);
+			for (Element childNode : elements) {
+				if ("description".equals(childNode.getNodeName())) {
+					attributeMap.put("description", childNode.getAttribute("description"));
+				}
+			}
+		}
+
+		ArgumentDefinition(FieldDefinition fieldDef, String name, Map<String, String> attributeMap) {
+			this.name = name;
+			this.attributeMap.putAll(attributeMap);
+		}
+
+		ArgumentDefinition(FieldDefinition fieldDef, String name, String type, String required, String defaultValue,
+				String description) {
+			this(fieldDef, name, type, required, false, defaultValue, description);
+		}
+
+		ArgumentDefinition(FieldDefinition fieldDef, String name, String type, String required, boolean isList,
+				String defaultValue, String description) {
+			this.name = name;
+			this.isList = isList;
+			attributeMap.put("type", type);
+			attributeMap.put("required", required);
+			attributeMap.put("defaultValue", defaultValue);
+			attributeMap.put("description", description);
+		}
+
+		String getName() {
+			return name;
+		}
+
+		String getType() {
+			return attributeMap.get("type");
+		}
+
+		String getRequired() {
+			return attributeMap.get("required");
+		}
+
+		String getDefaultValue() {
+			return attributeMap.get("defaultValue");
+		}
+
+		String getDescription() {
+			return attributeMap.get("description");
+		}
+
+		@Override
+		protected Object clone() throws CloneNotSupportedException {
+			// TODO Auto-generated method stub
+			return super.clone();
+		}
+
+	}
+
+	static class InputObjectFieldDefinition {
+		String name, type, description;
+		boolean nonNull;
+
+		public boolean isNonNull() {
+			return nonNull;
+		}
+
+		public boolean isList() {
+			return list;
+		}
+
+		public boolean isListItemNonNull() {
+			return listItemNonNull;
+		}
+
+		boolean list;
+		boolean listItemNonNull;
+		Object defaultValue;
+
+		InputObjectFieldDefinition(String name, String type, Object defaultValue, String description) {
+			this.name = name;
+			this.type = type;
+			this.defaultValue = defaultValue;
+			this.nonNull = false;
+			this.list = false;
+			this.listItemNonNull = false;
+			this.description = description;
+		}
+
+		InputObjectFieldDefinition(String name, String type, Object defaultValue, String description, boolean nonNull,
+				boolean list, boolean listItemNonNull) {
+			this.name = name;
+			this.type = type;
+			this.defaultValue = defaultValue;
+			this.nonNull = nonNull;
+			this.list = list;
+			this.listItemNonNull = listItemNonNull;
+			this.description = description;
+		}
+	}
+
 	/**
 	 * Creates a new GraphQLSchema using SDL
+	 * 
 	 * @return
 	 */
 	public GraphQLSchema newSDLSchema() {
 		SchemaParser schemaParser = new SchemaParser();
 		SchemaGenerator schemaGenerator = new SchemaGenerator();
-		Reader cdpSchemaReader = getSchemaReader("component://graphql/gql-schema/schema.graphqls");
+		Reader cdpSchemaReader = getSchemaReader("component://graphql/graphql-schema/schema.graphqls");
 		TypeDefinitionRegistry typeRegistry = new TypeDefinitionRegistry();
 		typeRegistry.merge(schemaParser.parse(cdpSchemaReader));
 		RuntimeWiring runtimeWiring = buildRuntimeWiring();
@@ -81,21 +1081,32 @@ public class GraphQLSchemaDefinition {
 
 	/**
 	 * Creates a new GraphQLSchema dynamically
+	 * 
 	 * @return
 	 */
 	public GraphQLSchema newDynamicSchema() {
-		GraphQLObjectType productType = newObject().name("Product").field(newFieldDefinition().name("productId").type(GraphQLString))
+		GraphQLObjectType productType = newObject().name("Product")
+				.field(newFieldDefinition().name("productId").type(GraphQLString))
 				.field(newFieldDefinition().name("productId").type(GraphQLString))
 				.field(newFieldDefinition().name("productName").type(GraphQLString))
 				.field(newFieldDefinition().name("description").type(GraphQLString))
 				.field(newFieldDefinition().name("productTypeId").type(GraphQLString))
 				.field(newFieldDefinition().name("primaryProductCategoryId").type(GraphQLString))
-		        .field(newFieldDefinition().name("isVirtual").type(GraphQLString)).build();
-		GraphQLObjectType queryType = newObject().name("Query")
-				.field(newFieldDefinition().name("product").type( productType).argument(GraphQLArgument.newArgument().name("id").type(GraphQLString))).build();
+				.field(newFieldDefinition().name("isVirtual").type(GraphQLString)).build();
+		GraphQLObjectType queryType = newObject().name("QueryRootObjectType").field(newFieldDefinition().name("product")
+				.type(productType).argument(GraphQLArgument.newArgument().name("id").type(GraphQLString))).build();
 		GraphQLCodeRegistry codeRegistry = GraphQLCodeRegistry.newCodeRegistry()
-				.dataFetcher(FieldCoordinates.coordinates("Query", "product"), new EntityDataFetcher())
-				.build();
+				.dataFetcher(FieldCoordinates.coordinates("Query", "product"),
+						new StaticDataFetcher("Test Static Response"))
+				.typeResolver("PartyInterface", new TypeResolver() {
+
+					@Override
+					public GraphQLObjectType getType(TypeResolutionEnvironment env) {
+						Object object = env.getObject();
+						System.out.println("object " + object);
+						return null;
+					}
+				}).build();
 		GraphQLSchema schema = GraphQLSchema.newSchema().query(queryType).codeRegistry(codeRegistry).build();
 		return schema;
 
@@ -113,6 +1124,7 @@ public class GraphQLSchemaDefinition {
 
 	/**
 	 * Builds Runtime Wiring for the schema types defined
+	 * 
 	 * @return
 	 */
 	private RuntimeWiring buildRuntimeWiring() {
@@ -120,37 +1132,580 @@ public class GraphQLSchemaDefinition {
 		build.type(newTypeWiring("Query").dataFetcher("product", new EntityDataFetcher()));
 		return build.build();
 	}
-	
-	private static abstract class AbstractGraphQLTypeDefinition {
-        String name;
-        String description;
-        String type;
-        abstract List<String> getDependentTypes();
-    }
-	
-	private static class ExtendObjectDefinition extends AbstractGraphQLTypeDefinition{
-        final Delegator delegator;
-        final LocalDispatcher dispatcher;
-        List<Element> extendObjectNodeList = new ArrayList<Element>();
-        String name, resolverField;
-        List<String> excludeFields = new ArrayList<>();
-        Map<String, String> resolverMap = new LinkedHashMap<>();
-        
-        ExtendObjectDefinition(Element node, Delegator delegator, LocalDispatcher dispatcher) {
-            this.delegator = delegator;
-            this.dispatcher = dispatcher;
-            this.extendObjectNodeList.add(node);
-            this.name = node.getAttribute("name");
-            List<? extends Element> elements = UtilXml.childElementList(node);
-            for (Element childNode : elements) {
-            }
-        }
 
-		@Override
-		List<String> getDependentTypes() {
-			// TODO Auto-generated method stub
-			return null;
+	private void addSchemaInputTypes() {
+		for (Map.Entry<String, GraphQLScalarType> entry : GraphQLSchemaUtil.graphQLScalarTypes.entrySet()) {
+			schemaInputTypeMap.put(entry.getKey(), entry.getValue());
 		}
-	}   
+
+		// schemaInputTypeMap.put(paginationInputType.getName(), paginationInputType);
+		// schemaInputTypeMap.put(operationInputType.getName(), operationInputType);
+		// schemaInputTypeMap.put(dateRangeInputType.getName(), dateRangeInputType);
+
+		// Add explicitly defined input types from *.graphql.xml
+		for (String inputTypeName : schemaInputTypeNameList) {
+			GraphQLInputType type = graphQLInputTypeMap.get(inputTypeName);
+			if (type == null)
+				throw new IllegalArgumentException("GraphQLInputType [" + inputTypeName + "] for schema not found");
+			schemaInputTypeMap.put(inputTypeName, type);
+		}
+
+		addSchemaInputObjectTypes();
+	}
+
+	private GraphQLTypeDefinition getTypeDef(String name) {
+		return allTypeDefMap.get(name);
+	}
+
+	private void populateSortedTypes() {
+		allTypeDefSortedList.clear();
+		GraphQLTypeDefinition queryTypeDef = getTypeDef(queryRootObjectTypeName);
+		GraphQLTypeDefinition mutationTypeDef = getTypeDef(mutationRootObjectTypeName);
+
+		TreeNode<GraphQLTypeDefinition> rootNode = new TreeNode<>(null);
+		TreeNode<GraphQLTypeDefinition> queryTypeNode = new TreeNode<GraphQLTypeDefinition>(queryTypeDef);
+		TreeNode<GraphQLTypeDefinition> interfaceNode = new TreeNode<>(null);
+
+		for (Map.Entry<String, InterfaceTypeDefinition> entry : interfaceTypeDefMap.entrySet())
+			interfaceNode.children.add(new TreeNode<GraphQLTypeDefinition>((InterfaceTypeDefinition) entry.getValue()));
+
+		rootNode.children.add(queryTypeNode);
+
+		List<String> objectTypeNames = new ArrayList<>(
+				Arrays.asList(queryRootObjectTypeName, mutationRootObjectTypeName));
+		createTreeNodeRecursive(interfaceNode, objectTypeNames, true);
+		traverseByPostOrder(interfaceNode, allTypeDefSortedList);
+
+		createTreeNodeRecursive(queryTypeNode, objectTypeNames, false);
+		traverseByPostOrder(queryTypeNode, allTypeDefSortedList);
+
+		if (mutationTypeDef != null) {
+			TreeNode<GraphQLTypeDefinition> mutationTypeNode = new TreeNode<GraphQLTypeDefinition>(mutationTypeDef);
+			rootNode.children.add(mutationTypeNode);
+			createTreeNodeRecursive(mutationTypeNode, objectTypeNames, false);
+			traverseByPostOrder(mutationTypeNode, allTypeDefSortedList);
+		}
+
+		for (Map.Entry<String, GraphQLTypeDefinition> entry : requiredTypeDefMap.entrySet()) {
+			if (allTypeDefSortedList.contains(entry.getValue()))
+				continue;
+			allTypeDefSortedList.add((GraphQLTypeDefinition) entry.getValue());
+		}
+	}
+
+	private void createTreeNodeRecursive(TreeNode<GraphQLTypeDefinition> node, List<String> objectTypeNames,
+			boolean includeInterface) {
+		if (node.data != null) {
+			for (String type : node.data.getDependentTypes()) {
+				// If type is GraphQL Scalar types, skip.
+				if (GraphQLSchemaUtil.graphQLScalarTypes.containsKey(type))
+					continue;
+				// If type is GraphQLObjectType which already added in Tree, skip.
+				if (objectTypeNames.contains(type))
+					continue;
+				if (!includeInterface && "interface".equals(type))
+					continue;
+
+				GraphQLTypeDefinition typeDef = getTypeDef(type);
+				if (typeDef != null) {
+					TreeNode<GraphQLTypeDefinition> typeTreeNode = new TreeNode<>(typeDef);
+					node.children.add(typeTreeNode);
+					objectTypeNames.add(type);
+					createTreeNodeRecursive(typeTreeNode, objectTypeNames, includeInterface);
+				} else {
+					System.err.println("No GraphQL Type " + type + " defined");
+				}
+			}
+		} else {
+			for (TreeNode<GraphQLTypeDefinition> childTreeNode : node.children) {
+				createTreeNodeRecursive(childTreeNode, objectTypeNames, includeInterface);
+			}
+		}
+	}
+
+	public GraphQLSchema generateSchema() {
+		addSchemaInputTypes();
+		populateSortedTypes();
+		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
+			switch (typeDef.type) {
+			case "interface":
+				// addGraphQLInterfaceType((InterfaceTypeDefinition) typeDef); // TO-DO
+				break;
+			}
+		}
+		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
+			switch (typeDef.type) {
+			case "object":
+				addGraphQLObjectType((ObjectTypeDefinition) typeDef);
+				break;
+			}
+		}
+		rebuildQueryObjectType();
+		GraphQLObjectType schemaQueryType = graphQLObjectTypeMap.get(this.queryRootObjectTypeName);
+		GraphQLSchema.Builder schemaBuilder = GraphQLSchema.newSchema().query(schemaQueryType);
+
+		if (mutationRootFieldMap.size() > 0) {
+			GraphQLObjectType schemaMutationType = graphQLObjectTypeMap.get(this.mutationRootObjectTypeName);
+			schemaBuilder = schemaBuilder.mutation(schemaMutationType);
+		}
+		return schemaBuilder.build();
+	}
+
+	private void traverseByPostOrder(TreeNode<GraphQLTypeDefinition> startNode,
+			LinkedList<GraphQLTypeDefinition> sortedList) {
+		if (startNode == null)
+			return;
+
+		for (TreeNode<GraphQLTypeDefinition> childNode : startNode.children) {
+			traverseByPostOrder(childNode, sortedList);
+		}
+
+		if (startNode.data == null)
+			return;
+
+		if (!sortedList.contains(startNode.data)) {
+			sortedList.add(startNode.data);
+		}
+	}
+
+	private void rebuildQueryObjectType() {
+		ObjectTypeDefinition queryObjectTypeDef = (ObjectTypeDefinition) allTypeDefMap.get(queryRootObjectTypeName);
+
+		GraphQLObjectType.Builder queryObjectTypeBuilder = GraphQLObjectType.newObject().name(queryRootObjectTypeName)
+				.description(queryObjectTypeDef.description);
+
+		for (FieldDefinition fieldDef : queryObjectTypeDef.getFieldList())
+			queryObjectTypeBuilder = queryObjectTypeBuilder.field(buildSchemaField(fieldDef));
+
+		// create a fake object type
+		GraphQLObjectType.Builder graphQLObjectTypeBuilder = GraphQLObjectType.newObject()
+				.name("FakeTypeReferenceContainer").description(
+						"This is only for contain GraphQLTypeReference so GraphQLSchema includes all of GraphQLTypeReference.");
+
+		boolean hasFakeField = false;
+		List<String> fakeFieldNameList = new ArrayList<>();
+		// fields for GraphQLTypeReference
+		for (Map.Entry<String, GraphQLTypeReference> entry : graphQLTypeReferenceMap.entrySet()) {
+			if (fakeFieldNameList.contains(entry.getKey()))
+				continue;
+
+			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, entry.getKey(), entry.getKey());
+			graphQLObjectTypeBuilder.field(buildSchemaField(fieldDef));
+			fakeFieldNameList.add(entry.getKey());
+			hasFakeField = true;
+		}
+
+		// fields for resolver type of interface
+		for (String resolverType : interfaceResolverTypeSet) {
+			if (fakeFieldNameList.contains(resolverType))
+				continue;
+
+			GraphQLTypeDefinition typeDef = getTypeDef(resolverType);
+			if (typeDef == null)
+				throw new IllegalArgumentException("GraphQLTypeDefinition [" + resolverType + "] not found");
+			addGraphQLObjectType((ObjectTypeDefinition) typeDef);
+
+			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, resolverType, resolverType);
+			graphQLObjectTypeBuilder.field(buildSchemaField(fieldDef));
+			fakeFieldNameList.add(resolverType);
+			hasFakeField = true;
+		}
+
+		if (hasFakeField) {
+			GraphQLObjectType fakeObjectType = graphQLObjectTypeBuilder.build();
+			GraphQLFieldDefinition fakeField = GraphQLFieldDefinition.newFieldDefinition()
+					.name("fakeTypeReferenceContainer").type(fakeObjectType).build();
+			queryObjectTypeBuilder.field(fakeField);
+		}
+
+		GraphQLObjectType queryObjectType = queryObjectTypeBuilder.build();
+		graphQLObjectTypeMap.put(queryRootObjectTypeName, queryObjectType);
+		graphQLOutputTypeMap.put(queryRootObjectTypeName, queryObjectType);
+	}
+
+	private static void addGraphQLObjectType(ObjectTypeDefinition objectTypeDef) {
+		String objectTypeName = objectTypeDef.name;
+		GraphQLObjectType objectType = graphQLObjectTypeMap.get(objectTypeName);
+		if (objectType != null)
+			return;
+
+		GraphQLObjectType.Builder objectTypeBuilder = GraphQLObjectType.newObject().name(objectTypeName)
+				.description(objectTypeDef.description);
+
+		for (String interfaceName : objectTypeDef.interfaceList) {
+			GraphQLInterfaceType interfaceType = graphQLInterfaceTypeMap.get(interfaceName);
+			if (interfaceType == null)
+				throw new IllegalArgumentException("GraphQLInterfaceType [" + interfaceName
+						+ "] for GraphQLObjectType [" + objectTypeName + "] not found.");
+
+			objectTypeBuilder = objectTypeBuilder.withInterface(interfaceType);
+		}
+
+		for (FieldDefinition fieldDef : objectTypeDef.getFieldList())
+			objectTypeBuilder = objectTypeBuilder.field(buildSchemaField(fieldDef));
+
+		objectType = objectTypeBuilder.build();
+		graphQLObjectTypeMap.put(objectTypeName, objectType);
+		graphQLOutputTypeMap.put(objectTypeName, objectType);
+	}
+
+	private static GraphQLFieldDefinition buildSchemaField(FieldDefinition fieldDef) {
+		GraphQLFieldDefinition graphQLFieldDef;
+
+		if (fieldDef.getArgumentList().size() == 0 && GraphQLSchemaUtil.graphQLScalarTypes.containsKey(fieldDef.type)) {
+			return getGraphQLFieldWithNoArgs(fieldDef);
+		}
+
+		GraphQLOutputType fieldType = getGraphQLOutputType(fieldDef);
+		GraphQLFieldDefinition.Builder graphQLFieldDefBuilder = GraphQLFieldDefinition.newFieldDefinition()
+				.name(fieldDef.name).type(fieldType).description(fieldDef.description);
+
+		// build arguments for field
+		for (ArgumentDefinition argNode : fieldDef.getArgumentList())
+			graphQLFieldDefBuilder.argument(buildSchemaArgument(argNode));
+
+		// TO-DO - Use of method is deprecated. Need to replace it with coderegistry
+		// implementation.
+		if (fieldDef.dataFetcher != null) {
+			graphQLFieldDefBuilder.dataFetcher(fieldDef.dataFetcher);
+		}
+		graphQLFieldDef = graphQLFieldDefBuilder.build();
+		return graphQLFieldDef;
+	}
+
+	private static GraphQLOutputType getGraphQLOutputType(FieldDefinition fieldDef) {
+		return getGraphQLOutputType(fieldDef.type, fieldDef.nonNull, fieldDef.isList, fieldDef.listItemNonNull);
+	}
+
+	private static GraphQLOutputType getGraphQLOutputType(String rawTypeName, String nonNull, String isList,
+			String listItemNonNull) {
+		GraphQLOutputType rawType = graphQLOutputTypeMap.get(rawTypeName);
+		if (rawType == null) {
+			rawType = graphQLTypeReferenceMap.get(rawTypeName);
+			if (rawType == null) {
+				rawType = new GraphQLTypeReference(rawTypeName);
+				graphQLTypeReferenceMap.put(rawTypeName, (GraphQLTypeReference) rawType);
+			}
+		}
+		return getGraphQLOutputType(rawType, nonNull, isList, listItemNonNull);
+	}
+
+	private static GraphQLOutputType getGraphQLOutputType(GraphQLOutputType rawType, String nonNull, String isList,
+			String listItemNonNull) {
+		String outputTypeKey = rawType.getName();
+		if ("true".equals(nonNull))
+			outputTypeKey = outputTypeKey + NON_NULL_SUFFIX;
+		if ("true".equals(isList)) {
+			outputTypeKey = outputTypeKey + IS_LIST_SUFFIX;
+			if ("true".equals(listItemNonNull))
+				outputTypeKey = outputTypeKey + LIST_ITEM_NON_NULL_SUFFIX;
+		}
+
+		GraphQLOutputType wrappedType = graphQLOutputTypeMap.get(outputTypeKey);
+		if (wrappedType != null)
+			return wrappedType;
+
+		wrappedType = rawType;
+		if ("true".equals(isList)) {
+			if ("true".equals(listItemNonNull))
+				wrappedType = new GraphQLNonNull(wrappedType);
+			wrappedType = new GraphQLList(wrappedType);
+		}
+		if ("true".equals(nonNull))
+			wrappedType = new GraphQLNonNull(wrappedType);
+
+		if (!outputTypeKey.equals(rawType.getName()))
+			graphQLOutputTypeMap.put(outputTypeKey, wrappedType);
+
+		return wrappedType;
+	}
+
+	private static GraphQLArgument buildSchemaArgument(ArgumentDefinition argumentDef) {
+		String argumentName = argumentDef.getName();
+		GraphQLArgument.Builder argument = GraphQLArgument.newArgument().name(argumentName)
+				.description(argumentDef.getDescription());
+
+		if (UtilValidate.isNotEmpty(argumentDef.getDefaultValue()))
+			argument.defaultValue(argumentDef.getDefaultValue());
+
+		GraphQLInputType argType = graphQLInputTypeMap.get(argumentDef.getType());
+		if (argType == null)
+			throw new IllegalArgumentException(
+					"GraphQLInputType [" + argumentDef.getType() + "] for argument [" + argumentName + "] not found");
+
+		if (argumentDef.isList) {
+			argType = new GraphQLList(argType);
+		}
+
+		if (argumentDef.getRequired().equalsIgnoreCase("true")) {
+			argument = argument.type(new GraphQLNonNull(argType));
+
+		} else {
+			argument = argument.type(argType);
+		}
+		return argument.build();
+	}
+
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(FieldDefinition fieldDef) {
+		if (fieldDef.getArgumentList().size() > 0)
+			throw new IllegalArgumentException(
+					"FieldDefinition [${fieldDef.name}] with type [${fieldDef.type}] has arguments, which should not be cached");
+		return getGraphQLFieldWithNoArgs(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
+				fieldDef.listItemNonNull, fieldDef.description, fieldDef.dataFetcher);
+	}
+
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+			String description) {
+		return getGraphQLFieldWithNoArgs(name, rawType, "false", "false", "false", description, null);
+	}
+
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, String rawTypeName, String nonNull,
+			String isList, String listItemNonNull, String description, BaseDataFetcher dataFetcher) {
+		GraphQLOutputType rawType = graphQLOutputTypeMap.get(rawTypeName);
+		if (rawType == null) {
+			rawType = graphQLTypeReferenceMap.get(rawTypeName);
+			if (rawType == null) {
+				rawType = new GraphQLTypeReference(rawTypeName);
+				graphQLTypeReferenceMap.put(rawTypeName, (GraphQLTypeReference) rawType);
+			}
+		}
+		return getGraphQLFieldWithNoArgs(name, rawType, nonNull, isList, listItemNonNull, description, dataFetcher);
+	}
+
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+			String nonNull, String isList, String listItemNonNull, BaseDataFetcher dataFetcher) {
+		return getGraphQLFieldWithNoArgs(name, rawType, nonNull, isList, listItemNonNull, "", dataFetcher);
+	}
+
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+			String nonNull, String isList, String listItemNonNull, String description, BaseDataFetcher dataFetcher) {
+		String fieldKey = getFieldKey(name, rawType.getName(), nonNull, isList, listItemNonNull);
+
+		GraphQLFieldDefinition field = graphQLFieldMap.get(fieldKey);
+		if (field != null)
+			return field;
+
+		GraphQLOutputType fieldType = null;
+		fieldType = getGraphQLOutputType(rawType, nonNull, "false", listItemNonNull);
+		GraphQLFieldDefinition.Builder fieldBuilder = GraphQLFieldDefinition.newFieldDefinition().name(name)
+				.description(description);
+		for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet())
+			fieldBuilder.argument(entry.getValue());
+
+		fieldBuilder.type(fieldType);
+
+		for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet())
+			fieldBuilder.argument((GraphQLArgument) entry.getValue());
+
+		if (dataFetcher != null) {
+			fieldBuilder.dataFetcher(dataFetcher);
+		}
+		field = fieldBuilder.build();
+		graphQLFieldMap.put(fieldKey, field);
+		return field;
+	}
+
+	// Create InputObjectType (Input) for mutation fields
+	private void addSchemaInputObjectTypes() {
+		for (Map.Entry<String, GraphQLTypeDefinition> entry : allTypeDefMap.entrySet()) {
+			if (!(entry.getValue() instanceof ObjectTypeDefinition)) {
+				continue;
+			}
+			for (FieldDefinition fieldDef : ((ObjectTypeDefinition) entry.getValue()).getFieldList()) {
+				if (fieldDef.isMutation) {
+					if (fieldDef.dataFetcher == null)
+						throw new IllegalArgumentException("FieldDefinition [" + fieldDef.name + "] - [" + fieldDef.type
+								+ "] as mutation must have a data fetcher");
+					if (fieldDef.dataFetcher instanceof EmptyDataFetcher)
+						throw new IllegalArgumentException("FieldDefinition [" + fieldDef.name + "] - [" + fieldDef.type
+								+ "] as mutation can't have empty data fetcher");
+				}
+
+				if (fieldDef.dataFetcher instanceof ServiceDataFetcher && fieldDef.isMutation) {
+					String serviceName = ((ServiceDataFetcher) fieldDef.dataFetcher).getServiceName();
+					String inputTypeName = GraphQLSchemaUtil.camelCaseToUpperCamel(fieldDef.name) + "Input";
+
+					boolean isEntityAutoService = ((ServiceDataFetcher) fieldDef.dataFetcher).isEntityAutoService();
+
+					Map<String, InputObjectFieldDefinition> inputFieldMap;
+					if (isEntityAutoService) {
+						// Entity Auto Service only works for mutation which is checked in
+						// ServiceDataFetcher initialization.
+						String verb = GraphQLSchemaUtil.getVerbFromName(serviceName, dispatcher);
+						String entityName = GraphQLSchemaUtil.getDefaultEntityName(serviceName, dispatcher);
+						ModelEntity entity = GraphQLSchemaUtil.getEntityDefinition(entityName, delegator);
+						List<String> allFields = verb.equals("delete") ? entity.getPkFieldNames()
+								: entity.getAllFieldNames();
+						inputFieldMap = new LinkedHashMap<>(allFields.size());
+						for (int i = 0; i < allFields.size(); i++) {
+							ModelField fi = entity.getField(allFields.get(i));
+							String inputFieldType = GraphQLSchemaUtil.fieldTypeGraphQLMap.get(fi.getType());
+							Object defaultValue = null;
+							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(fi.getName(),
+									inputFieldType, defaultValue, "");
+							inputFieldMap.put(fi.getName(), inputFieldDef);
+						}
+
+					} else {
+						ModelService sd = GraphQLSchemaUtil.getServiceDefinition(serviceName, dispatcher);
+						inputFieldMap = new LinkedHashMap<>(sd.getInParamNames().size());
+						for (String parmName : sd.getInParamNames()) {
+							ModelParam parmNode = sd.getParam(parmName);
+							boolean isInternal = parmNode.internal;
+							if (isInternal) {
+								continue;
+							}
+							Object defaultValue = null;
+							boolean inputFieldNonNull = !parmNode.isOptional();
+							boolean inputFieldIsList = GraphQLSchemaUtil.getShortJavaType(parmNode.type).equals("List")
+									? true
+									: false;
+
+							GraphQLInputType fieldInputType = getInputTypeRecursiveInSD(parmNode, inputTypeName);
+							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(parmName,
+									fieldInputType.getName(), defaultValue, "", inputFieldNonNull, inputFieldIsList,
+									false);
+							inputFieldMap.put(parmName, inputFieldDef);
+						}
+					}
+
+					GraphQLInputObjectType.Builder inputObjectTypeBuilder = GraphQLInputObjectType.newInputObject()
+							.name(inputTypeName).description("Autogenerated input type of " + inputTypeName);
+
+					for (Map.Entry<String, InputObjectFieldDefinition> inputFieldEntry : inputFieldMap.entrySet()) {
+						InputObjectFieldDefinition inputFieldDef = inputFieldEntry.getValue();
+
+						if ("clientMutationId".equals(inputFieldDef.name))
+							continue;
+
+						inputObjectTypeBuilder.field(buildSchemaInputField(inputFieldDef));
+					}
+					inputObjectTypeBuilder.field(clientMutationIdInputField);
+					GraphQLInputObjectType inputObjectType = inputObjectTypeBuilder.build();
+					graphQLInputTypeMap.put(inputTypeName, inputObjectType);
+
+				}
+
+				if (fieldDef.dataFetcher instanceof ServiceDataFetcher && !fieldDef.isMutation) {
+					String serviceName = ((ServiceDataFetcher) fieldDef.dataFetcher).getServiceName();
+					String inputTypeName = GraphQLSchemaUtil.camelCaseToUpperCamel(fieldDef.name);
+					boolean isEntityAutoService = ((ServiceDataFetcher) fieldDef.dataFetcher).isEntityAutoService();
+					if (isEntityAutoService) {
+						throw new IllegalArgumentException("Entity auto service is not supported for query field");
+					} else {
+						ModelService sd = GraphQLSchemaUtil.getServiceDefinition(serviceName, dispatcher);
+						for (String parmName : sd.getParameterNames("IN", true, false)) {
+							ModelParam parmNode = sd.getParam(parmName);
+							getInputTypeRecursiveInSD(parmNode, inputTypeName);
+						}
+					}
+				}
+
+			}
+
+		}
+
+	}
+
+	private GraphQLInputType getInputTypeRecursiveInSD(ModelParam node, String inputTypeNamePrefix) {
+		// default to String
+		if (node == null)
+			return GraphQLString;
+
+		String parmName = node.getName();
+		String parmType = node.getType();
+		String inputTypeName = GraphQLSchemaUtil.getGraphQLTypeNameByJava(parmType);
+
+		GraphQLScalarType scalarType = GraphQLSchemaUtil.graphQLScalarTypes.get(inputTypeName);
+		if (scalarType != null)
+			return scalarType;
+
+		inputTypeName = inputTypeNamePrefix + '_' + parmName;
+
+		GraphQLInputType inputType = graphQLInputTypeMap.get(inputTypeName);
+		if (inputType != null)
+			return inputType;
+
+		switch (parmType) {
+		case "List":
+			break;
+		case "Map":
+
+			break;
+		case "com.moqui.graphql.PaginationInputType":
+			return paginationInputType;
+		case "com.moqui.graphql.OperationInputType":
+			return operationInputType;
+		case "com.moqui.graphql.DateRangeInputType":
+			return dateRangeInputType;
+		case "graphql.schema.DataFetchingEnvironment":
+			return null;
+		default:
+			throw new IllegalArgumentException(
+					"Type " + inputTypeName + " - " + parmType + " for input field is not supported");
+		}
+
+		graphQLInputTypeMap.put(inputTypeName, inputType);
+		return inputType;
+	}
+
+	private static GraphQLInputObjectField buildSchemaInputField(InputObjectFieldDefinition inputFieldDef) {
+		String inputFieldKey = getInputFieldKey(inputFieldDef);
+		GraphQLInputObjectField inputObjectField = graphQLInputObjectFieldMap.get(inputFieldKey);
+		if (inputObjectField != null)
+			return inputObjectField;
+
+		GraphQLInputType rawType = graphQLInputTypeMap.get(inputFieldDef.type);
+
+		GraphQLInputType wrapperType = rawType;
+		if (inputFieldDef.isList()) {
+			if (inputFieldDef.listItemNonNull)
+				wrapperType = new GraphQLNonNull(wrapperType);
+			wrapperType = new GraphQLList(wrapperType);
+		}
+		if (inputFieldDef.nonNull)
+			wrapperType = new GraphQLNonNull(wrapperType);
+
+		GraphQLInputObjectField inputField = GraphQLInputObjectField.newInputObjectField().name(inputFieldDef.name)
+				.type(wrapperType).defaultValue(inputFieldDef.defaultValue).description(inputFieldDef.description)
+				.build();
+
+		graphQLInputObjectFieldMap.put(inputFieldKey, inputField);
+		return inputField;
+	}
+
+	private static int unknownInputDefaultValueNum = 0;
+
+	private static String getInputFieldKey(InputObjectFieldDefinition inputFieldDef) {
+		return getInputFieldKey(inputFieldDef.name, inputFieldDef.type, inputFieldDef.defaultValue,
+				inputFieldDef.isNonNull(), inputFieldDef.isList(), inputFieldDef.listItemNonNull);
+	}
+
+	private static String getInputFieldKey(String name, String type, Object defaultValue) {
+		return getInputFieldKey(name, type, defaultValue, false, false, false);
+	}
+
+	private static String getInputFieldKey(String name, String type, Object defaultValue, boolean nonNull,
+			boolean isList, boolean listItemNonNull) {
+		String defaultValueKey;
+		if (defaultValue == null) {
+			defaultValueKey = "NULL";
+		} else {
+			// TODO: generate a unique key based on defaultValue
+			defaultValueKey = "UNKNOWN" + Integer.toString(unknownInputDefaultValueNum);
+			unknownInputDefaultValueNum++;
+		}
+
+		String inputFieldKey = name + KEY_SPLITTER + type + KEY_SPLITTER + defaultValueKey;
+		if (nonNull)
+			inputFieldKey = inputFieldKey + NON_NULL_SUFFIX;
+		if (isList) {
+			inputFieldKey = inputFieldKey + IS_LIST_SUFFIX;
+			if (listItemNonNull)
+				inputFieldKey = inputFieldKey + LIST_ITEM_NON_NULL_SUFFIX;
+		}
+
+		return inputFieldKey;
+	}
 
 }

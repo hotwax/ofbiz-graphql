@@ -67,7 +67,7 @@ public class GraphQLEndpointServletImpl extends SimpleGraphQLHttpServlet {
 		mapper = GraphQLObjectMapper.newBuilder().withObjectMapperConfigurer(new OFBizGraphQLObjectMapperConfigurer()).build();
 		loadSchemaElements();
 		GraphQLSchemaDefinition schemaDef= new GraphQLSchemaDefinition((Delegator)getServletContext().getAttribute("delegator"), (LocalDispatcher)getServletContext().getAttribute("dispatcher"), graphQLSchemaElementMap);
-		configuration = GraphQLConfiguration.with(schemaDef.newDynamicSchema()).with(false).with(mapper).build();
+		configuration = GraphQLConfiguration.with(schemaDef.generateSchema()).with(false).with(mapper).build();
 		return configuration;
 	}
 	

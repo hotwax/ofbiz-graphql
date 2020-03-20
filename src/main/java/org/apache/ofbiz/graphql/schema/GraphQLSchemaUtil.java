@@ -26,26 +26,49 @@ import static graphql.Scalars.GraphQLChar;
 import static graphql.Scalars.GraphQLFloat;
 import static graphql.Scalars.GraphQLID;
 import static graphql.Scalars.GraphQLInt;
+import static graphql.Scalars.GraphQLLong;
 import static graphql.Scalars.GraphQLShort;
 import static graphql.Scalars.GraphQLString;
+import static org.apache.ofbiz.graphql.Scalars.GraphQLTimestamp;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
+
+import org.apache.ofbiz.base.util.UtilValidate;
+import org.apache.ofbiz.base.util.UtilXml;
+import org.apache.ofbiz.entity.Delegator;
+import org.apache.ofbiz.entity.GenericEntityException;
+import org.apache.ofbiz.entity.model.ModelEntity;
+import org.apache.ofbiz.entity.model.ModelField;
+import org.apache.ofbiz.entity.model.ModelReader;
+import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.ArgumentDefinition;
+import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.AutoArgumentsDefinition;
+import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
+import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.GraphQLTypeDefinition;
+import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.ObjectTypeDefinition;
+import org.apache.ofbiz.service.GenericServiceException;
+import org.apache.ofbiz.service.LocalDispatcher;
+import org.apache.ofbiz.service.ModelParam;
+import org.apache.ofbiz.service.ModelService;
+import org.w3c.dom.Element;
 
 import graphql.schema.GraphQLScalarType;
 
 public class GraphQLSchemaUtil {
-	
+
 	public static final Map<String, GraphQLScalarType> graphQLScalarTypes = new HashMap<String, GraphQLScalarType>();
 	public static final Map<String, String> fieldTypeGraphQLMap = new HashMap<String, String>();
 	public static final Map<String, String> javaTypeGraphQLMap = new HashMap<String, String>();
 
 	public static final List<String> graphQLStringTypes = Arrays.asList("String", "ID", "Char");
 	public static final List<String> graphQLDateTypes = Arrays.asList("Timestamp");
-	public static final List<String> graphQLNumericTypes = Arrays.asList("Int", "Long", "Float", "BigInteger",
-			"BigDecimal", "Short");
+	public static final List<String> graphQLNumericTypes = Arrays.asList("Int", "Long", "Float", "BigInteger", "BigDecimal", "Short");
 	public static final List<String> graphQLBoolTypes = Arrays.asList("Boolean");
 
 	static {
@@ -59,6 +82,8 @@ public class GraphQLSchemaUtil {
 		graphQLScalarTypes.put("ID", GraphQLID);
 		graphQLScalarTypes.put("BigDecimal", GraphQLBigDecimal);
 		graphQLScalarTypes.put("Short", GraphQLShort);
+		graphQLScalarTypes.put("Long", GraphQLLong);
+		graphQLScalarTypes.put("Timestamp", GraphQLTimestamp);
 
 		fieldTypeGraphQLMap.put("id", "ID");
 		fieldTypeGraphQLMap.put("indicator", "String");
@@ -111,5 +136,286 @@ public class GraphQLSchemaUtil {
 		javaTypeGraphQLMap.put("java.lang.Boolean", "Boolean");
 
 	}
+
+	public static String camelCaseToUpperCamel(String camelCase) {
+		if (camelCase == null || camelCase.length() == 0)
+			return "";
+		return Character.toString(Character.toUpperCase(camelCase.charAt(0))) + camelCase.substring(1);
+	}
+
+	static void createObjectTypeNodeForAllEntities(Delegator delegator, LocalDispatcher dispatcher,
+			Map<String, GraphQLTypeDefinition> allTypeNodeMap) {
+
+		List<ModelEntity> entities = getAllEntities(delegator, "org.apache.ofbiz", true);
+		for (ModelEntity entity : entities) {
+			addObjectTypeNode(delegator, dispatcher, entity, true, allTypeNodeMap);
+		}
+	}
+
+	private static void addObjectTypeNode(Delegator delegator, LocalDispatcher dispatcher, ModelEntity ed,
+			boolean standalone, Map<String, GraphQLTypeDefinition> allTypeDefMap) {
+		String objectTypeName = ed.getEntityName();
+
+		if (allTypeDefMap.containsKey(objectTypeName))
+			return;
+		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
+		List<String> allFields = ed.getAllFieldNames();
+
+		if (!allFields.contains("id")) {
+			// Add a id field to all entity Object Type
+			GraphQLSchemaDefinition.FieldDefinition idFieldDef = GraphQLSchemaDefinition.getCachedFieldDefinition("id",
+					"ID", "false", "false", "false");
+			if (idFieldDef == null) {
+				idFieldDef = new GraphQLSchemaDefinition.FieldDefinition(delegator, dispatcher, "id", "ID",
+						new HashMap<String, String>());
+				GraphQLSchemaDefinition.putCachedFieldDefinition(idFieldDef);
+			}
+			fieldDefMap.put("id", idFieldDef);
+		}
+
+		for (String fieldName : allFields) {
+			ModelField field = ed.getField(fieldName);
+			String fieldScalarType = fieldTypeGraphQLMap.get(field.getType());
+			if (fieldScalarType != null && fieldScalarType.equals("Timestamp")) {
+				continue;
+			}
+			Map<String, String> fieldPropertyMap = new HashMap<>();
+			if (field.getIsPk() || field.getIsNotNull()) {
+				fieldPropertyMap.put("nonNull", "true");
+			}
+			fieldPropertyMap.put("description",
+					UtilValidate.isEmpty(field.getDescription()) ? "" : field.getDescription());
+			FieldDefinition fieldDef = GraphQLSchemaDefinition.getCachedFieldDefinition(fieldName, fieldScalarType,
+					fieldPropertyMap.get("nonNull"), "false", "false");
+			if (fieldDef == null) {
+				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldScalarType, fieldPropertyMap);
+				GraphQLSchemaDefinition.putCachedFieldDefinition(fieldDef);
+			}
+			fieldDefMap.put(fieldName, fieldDef);
+
+		}
+
+		ObjectTypeDefinition objectTypeDef = new ObjectTypeDefinition(delegator, dispatcher, objectTypeName,
+				ed.getDescription(), new ArrayList<String>(), fieldDefMap);
+		allTypeDefMap.put(objectTypeName, objectTypeDef);
+
+	}
+
+	private static List<ModelEntity> getAllEntities(Delegator delegator, String groupName,
+			boolean excludeViewEntities) {
+		List<ModelEntity> entities = new ArrayList<ModelEntity>();
+		ModelReader reader = delegator.getModelReader();
+		TreeSet<String> entityNames = null;
+		try {
+			entityNames = new TreeSet<String>(reader.getEntityNames());
+		} catch (GenericEntityException e) {
+		}
+		entityNames.forEach(entityName -> {
+			try {
+				final ModelEntity entity = reader.getModelEntity(entityName);
+				entities.add(entity);
+			} catch (Exception e) {
+
+			}
+		});
+
+		return entities;
+	}
+
+	public static void transformArguments(Map<String, Object> arguments, Map<String, Object> inputFieldsMap) {
+		for (Map.Entry<String, Object> entry : arguments.entrySet()) {
+			String argName = entry.getKey();
+			// Ignore if argument which is used for directive @include and @skip
+			if ("if".equals(argName))
+				continue;
+			Object argValue = entry.getValue();
+			if (argValue == null)
+				continue;
+
+			if (argValue instanceof LinkedHashMap) {
+				Map argValueMap = (LinkedHashMap) argValue;
+				if ("input".equals(argName)) {
+					argValueMap.forEach((k, v) -> {
+						inputFieldsMap.put((String) k, v);
+					});
+					continue;
+				}
+
+				if (argValueMap.get("value") != null)
+					inputFieldsMap.put(argName, argValueMap.get("value"));
+				if (argValueMap.get("op") != null)
+					inputFieldsMap.put(argName + "_op", argValueMap.get("op"));
+				if (argValueMap.get("not") != null)
+					inputFieldsMap.put(argName + "_not", argValueMap.get("not"));
+				if (argValueMap.get("ic") != null)
+					inputFieldsMap.put(argName + "_ic", argValueMap.get("ic"));
+				inputFieldsMap.put("pageIndex", 0);
+				inputFieldsMap.put("pageSize", 20);
+				if (argValueMap.get("pageNoLimit") != null)
+					inputFieldsMap.put("pageNoLimit", argValueMap.get("pageNoLimit"));
+				if (argValueMap.get("orderByField") != null)
+					inputFieldsMap.put("orderByField", argValueMap.get("orderByField"));
+
+				if (argValueMap.get("period") != null)
+					inputFieldsMap.put(argName + "_period", argValueMap.get("period"));
+				if (argValueMap.get("poffset") != null)
+					inputFieldsMap.put(argName + "_poffset", argValueMap.get("poffset"));
+				if (argValueMap.get("from") != null)
+					inputFieldsMap.put(argName + "_from", argValueMap.get("from"));
+				if (argValueMap.get("thru") != null)
+					inputFieldsMap.put(argName + "_thru", argValueMap.get("thru"));
+
+			} else {
+				// periodValid_ type argument is handled specially
+				if (!(argName == "periodValid_" || argName.endsWith("PeriodValid_"))) {
+					inputFieldsMap.put(argName, argValue);
+				}
+			}
+		}
+	}
+
+	public static void transformQueryServiceRelArguments(Map<String, Object> source, Map<String, String> relKeyMap,
+			Map<String, Object> inParameterMap) {
+		for (Map.Entry<String, String> keyMapEntry : relKeyMap.entrySet())
+			inParameterMap.put((String) keyMapEntry.getValue(), source.get(keyMapEntry.getKey()));
+
+	}
+
+	public static void transformQueryServiceArguments(ModelService sd, Map<String, Object> arguments,
+			Map<String, Object> inParameterMap) {
+		for (Map.Entry<String, Object> entry : arguments.entrySet()) {
+			String paramName = entry.getKey();
+			if ("if".equals(paramName))
+				continue;
+			if (entry.getValue() == null)
+				continue;
+			ModelParam paramNode = sd.getParam(paramName);
+			if (paramNode == null)
+				throw new IllegalArgumentException("Service ${sd.serviceName} missing in parameter ${paramName}");
+			if (!paramNode.isIn()) {
+				throw new IllegalArgumentException("The Param Was not IN");
+			}
+			String paramType = paramNode.getType();
+			Object paramJavaTypeValue;
+			inParameterMap.put(paramName, entry.getValue());
+		}
+
+	}
+
+	public static void mergeFieldDefinition(Element fieldNode, Map<String, FieldDefinition> fieldDefMap,
+			Delegator delegator, LocalDispatcher dispatcher) {
+		FieldDefinition fieldDef = fieldDefMap.get(fieldNode.getAttribute("name"));
+		if (fieldDef != null) {
+			if (UtilValidate.isNotEmpty(fieldNode.getAttribute("type")))
+				fieldDef.type = fieldNode.getAttribute("type");
+			if (UtilValidate.isNotEmpty(fieldNode.getAttribute("non-null")))
+				fieldDef.nonNull = fieldNode.getAttribute("non-null");
+			if (UtilValidate.isNotEmpty(fieldNode.getAttribute("is-list")))
+				fieldDef.isList = fieldNode.getAttribute("is-list");
+			if (UtilValidate.isNotEmpty(fieldNode.getAttribute("list-item-non-null")))
+				fieldDef.listItemNonNull = fieldNode.getAttribute("list-item-non-null");
+			if (UtilValidate.isNotEmpty(fieldNode.getAttribute("require-authentication")))
+				fieldDef.requireAuthentication = fieldNode.getAttribute("require-authentication");
+			List<? extends Element> elements = UtilXml.childElementList(fieldNode);
+			for (Element childNode : elements) {
+				switch (childNode.getNodeName()) {
+				case "description":
+					fieldDef.description = childNode.getTextContent();
+					break;
+				case "depreciation-reason":
+					fieldDef.depreciationReason = childNode.getTextContent();
+					break;
+				case "auto-arguments":
+					//fieldDef.mergeArgument(new AutoArgumentsDefinition(childNode));
+					break;
+				case "argument":
+					String argTypeName = GraphQLSchemaDefinition.getArgumentTypeName(childNode.getAttribute("type"),
+							fieldDef.isList);
+					ArgumentDefinition argDef = GraphQLSchemaDefinition.getCachedArgumentDefinition(
+							childNode.getAttribute("name"), argTypeName, childNode.getAttribute("required"));
+					if (argDef == null) {
+						argDef = new ArgumentDefinition(childNode, fieldDef);
+						GraphQLSchemaDefinition.putCachedArgumentDefinition(argDef);
+					}
+
+					fieldDef.mergeArgument(argDef);
+					break;
+				case "entity-fetcher":
+					fieldDef.setDataFetcher(new EntityDataFetcher(delegator, childNode, fieldDef));
+					break;
+				}
+			}
+		} else {
+			fieldDef = new FieldDefinition(delegator, dispatcher, fieldNode);
+			fieldDefMap.put(fieldDef.name, fieldDef);
+		}
+	}
+
+	public static String getDefaultEntityName(String serviceName, LocalDispatcher dispatcher) {
+		String defaultEntityName = null;
+		try {
+			ModelService service = dispatcher.getDispatchContext().getModelService(serviceName);
+			if (service == null) {
+				throw new IllegalArgumentException("Service " + serviceName + " not found");
+			}
+			defaultEntityName = service.defaultEntityName;
+		} catch (GenericServiceException e) {
+			e.printStackTrace();
+		}
+		return defaultEntityName;
+	}
+
+	public static ModelEntity getEntityDefinition(String entityName, Delegator delegator) {
+		ModelEntity entity = null;
+		try {
+			entity = delegator.getModelReader().getModelEntity(entityName);
+		} catch (GenericEntityException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		if (entity == null) {
+			throw new IllegalArgumentException("Entity Definition " + entityName + " not found");
+		}
+
+		return entity;
+	}
+	
+	public static String getVerbFromName(String serviceName, LocalDispatcher dispatcher) {
+		String verb = null;
+		ModelService service = getServiceDefinition(serviceName, dispatcher);
+		if (service.engineName.equalsIgnoreCase("entity-auto")) {
+			verb = service.invoke;
+		}
+		return verb;
+	}
+	
+	public static ModelService getServiceDefinition(String serviceName, LocalDispatcher dispatcher) {
+		ModelService service = null;
+		try {
+			service = dispatcher.getDispatchContext().getModelService(serviceName);
+			if (service == null) {
+				throw new IllegalArgumentException("Service " + serviceName + " not found");
+			}
+
+		} catch (GenericServiceException e) {
+			e.printStackTrace();
+		}
+
+		return service;
+	}
+	
+	public static String getShortJavaType(String javaType) {
+		if (javaType == null)
+			return "";
+		String shortJavaType = javaType;
+		if (javaType.contains("."))
+			shortJavaType = javaType.substring(javaType.lastIndexOf(".") + 1);
+		return shortJavaType;
+	}
+	
+	static String getGraphQLTypeNameByJava(String javaType) {
+        if (javaType == null) return "String";
+        return javaTypeGraphQLMap.get(getShortJavaType(javaType));
+    }
 
 }
