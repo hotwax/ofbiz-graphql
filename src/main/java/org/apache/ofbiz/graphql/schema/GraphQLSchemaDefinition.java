@@ -38,6 +38,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import org.apache.ofbiz.base.util.FileUtil;
 import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
@@ -47,12 +48,14 @@ import org.apache.ofbiz.entity.model.ModelField;
 import org.apache.ofbiz.graphql.fetcher.BaseDataFetcher;
 import org.apache.ofbiz.graphql.fetcher.EmptyDataFetcher;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.apache.ofbiz.graphql.fetcher.InterfaceDataFetcher;
 import org.apache.ofbiz.graphql.fetcher.ServiceDataFetcher;
 import org.apache.ofbiz.service.GenericServiceException;
 import org.apache.ofbiz.service.LocalDispatcher;
 import org.apache.ofbiz.service.ModelParam;
 import org.apache.ofbiz.service.ModelService;
 import org.w3c.dom.Element;
+
 import graphql.TypeResolutionEnvironment;
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
@@ -770,8 +773,7 @@ public class GraphQLSchemaDefinition {
 					String refName = childNode.getAttribute("ref") != null ? childNode.getAttribute("ref")
 							: "NOT_EXIST";
 					Element refNode = interfaceFetcherNodeMap.get(refName);
-					// TO-DO this.dataFetcher = new InterfaceDataFetcher(childNode, refNode, this,
-					// delegator, dispatcher);
+					this.dataFetcher = new InterfaceDataFetcher(childNode, refNode, this, delegator, dispatcher);
 					break;
 				case "entity-fetcher":
 					dataFetcherType = "entity";
@@ -1229,7 +1231,7 @@ public class GraphQLSchemaDefinition {
 		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
 			switch (typeDef.type) {
 			case "interface":
-				// addGraphQLInterfaceType((InterfaceTypeDefinition) typeDef); // TO-DO
+				addGraphQLInterfaceType((InterfaceTypeDefinition) typeDef);
 				break;
 			}
 		}
@@ -1249,6 +1251,42 @@ public class GraphQLSchemaDefinition {
 			schemaBuilder = schemaBuilder.mutation(schemaMutationType);
 		}
 		return schemaBuilder.build();
+	}
+	
+	private static void addGraphQLInterfaceType(InterfaceTypeDefinition interfaceTypeDef) {
+		String interfaceTypeName = interfaceTypeDef.name;
+		GraphQLInterfaceType interfaceType = graphQLInterfaceTypeMap.get(interfaceTypeName);
+		if (interfaceType != null)
+			return;
+
+		interfaceResolverTypeSet.addAll(interfaceTypeDef.resolverMap.values());
+
+		GraphQLInterfaceType.Builder interfaceTypeBuilder = GraphQLInterfaceType.newInterface().name(interfaceTypeName).description(interfaceTypeDef.description);
+
+		for (FieldDefinition fieldDef : interfaceTypeDef.getFieldList()) {
+			interfaceTypeBuilder.field(buildSchemaField(fieldDef));
+		}
+
+		// TODO: Add typeResolver for type, one way is to add a service as resolver
+		if (!interfaceTypeDef.convertFromObjectTypeName.isEmpty()) {
+			if (interfaceTypeDef.resolverField == null || interfaceTypeDef.resolverField.isEmpty())
+				throw new IllegalArgumentException("Interface definition of ${interfaceTypeName} resolverField not set");
+            interfaceTypeBuilder.typeResolver(new TypeResolver() {
+                @Override
+                public GraphQLObjectType getType(TypeResolutionEnvironment env) {
+                    Object object = env.getObject();
+                    String resolverFieldValue = (String) ((Map) object).get(interfaceTypeDef.resolverField);
+                    String resolvedTypeName = interfaceTypeDef.resolverMap.get(resolverFieldValue);
+                    GraphQLObjectType resolvedType = graphQLObjectTypeMap.get(resolvedTypeName);
+                    if (resolvedType == null) resolvedType = graphQLObjectTypeMap.get(interfaceTypeDef.defaultResolvedTypeName);
+                    return resolvedType;
+                }
+            });
+		}
+
+		interfaceType = interfaceTypeBuilder.build();
+		graphQLInterfaceTypeMap.put(interfaceTypeName, interfaceType);
+		graphQLOutputTypeMap.put(interfaceTypeName, interfaceType);
 	}
 
 	private void traverseByPostOrder(TreeNode<GraphQLTypeDefinition> startNode,
@@ -1351,8 +1389,11 @@ public class GraphQLSchemaDefinition {
 
 	private static GraphQLFieldDefinition buildSchemaField(FieldDefinition fieldDef) {
 		GraphQLFieldDefinition graphQLFieldDef;
+		System.out.println("fieldDef.name "+fieldDef.name);
+		System.out.println("Argument: "+fieldDef.getArgumentList().size());
 
 		if (fieldDef.getArgumentList().size() == 0 && GraphQLSchemaUtil.graphQLScalarTypes.containsKey(fieldDef.type)) {
+			System.out.println("Returning here for "+fieldDef.name);
 			return getGraphQLFieldWithNoArgs(fieldDef);
 		}
 
@@ -1360,6 +1401,8 @@ public class GraphQLSchemaDefinition {
 		GraphQLFieldDefinition.Builder graphQLFieldDefBuilder = GraphQLFieldDefinition.newFieldDefinition()
 				.name(fieldDef.name).type(fieldType).description(fieldDef.description);
 
+		
+		
 		// build arguments for field
 		for (ArgumentDefinition argNode : fieldDef.getArgumentList())
 			graphQLFieldDefBuilder.argument(buildSchemaArgument(argNode));
