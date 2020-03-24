@@ -26,7 +26,9 @@ import javax.servlet.http.HttpServletRequest;
 
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
+import org.apache.ofbiz.entity.GenericEntityException;
 import org.apache.ofbiz.entity.GenericValue;
+import org.apache.ofbiz.entity.util.EntityQuery;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaUtil;
 import org.apache.ofbiz.service.GenericServiceException;
@@ -161,6 +163,14 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 
 					} else {
 						String entityName = GraphQLSchemaUtil.getDefaultEntityName(verb, dispatcher);
+						 GenericValue entity = null;
+							try {
+								entity = EntityQuery.use(delegator).from(entityName).where(result).cache().queryOne();
+								result.put("_graphql_result_", entity);
+							} catch (GenericEntityException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							}
 					}
 				}
 			} else {
