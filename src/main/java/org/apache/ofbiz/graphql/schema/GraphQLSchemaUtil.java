@@ -31,6 +31,9 @@ import static graphql.Scalars.GraphQLShort;
 import static graphql.Scalars.GraphQLString;
 import static org.apache.ofbiz.graphql.Scalars.GraphQLTimestamp;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -48,7 +51,6 @@ import org.apache.ofbiz.entity.model.ModelField;
 import org.apache.ofbiz.entity.model.ModelReader;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.ArgumentDefinition;
-import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.AutoArgumentsDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.GraphQLTypeDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.ObjectTypeDefinition;
@@ -58,6 +60,8 @@ import org.apache.ofbiz.service.ModelParam;
 import org.apache.ofbiz.service.ModelService;
 import org.w3c.dom.Element;
 
+import graphql.language.Field;
+import graphql.schema.DataFetchingEnvironment;
 import graphql.schema.GraphQLScalarType;
 
 public class GraphQLSchemaUtil {
@@ -109,7 +113,10 @@ public class GraphQLSchemaUtil {
 		fieldTypeGraphQLMap.put("time", "String");
 		fieldTypeGraphQLMap.put("very-long", "String");
 		fieldTypeGraphQLMap.put("floating-point", "Float");
-
+		fieldTypeGraphQLMap.put("object", "Byte");
+		fieldTypeGraphQLMap.put("byte-array", "Byte");
+		fieldTypeGraphQLMap.put("blob", "Byte");
+		
 		javaTypeGraphQLMap.put("String", "String");
 		javaTypeGraphQLMap.put("java.lang.String", "String");
 		javaTypeGraphQLMap.put("CharSequence", "String");
@@ -155,7 +162,6 @@ public class GraphQLSchemaUtil {
 	private static void addObjectTypeNode(Delegator delegator, LocalDispatcher dispatcher, ModelEntity ed,
 			boolean standalone, Map<String, GraphQLTypeDefinition> allTypeDefMap) {
 		String objectTypeName = ed.getEntityName();
-
 		if (allTypeDefMap.containsKey(objectTypeName))
 			return;
 		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
@@ -188,6 +194,7 @@ public class GraphQLSchemaUtil {
 			FieldDefinition fieldDef = GraphQLSchemaDefinition.getCachedFieldDefinition(fieldName, fieldScalarType,
 					fieldPropertyMap.get("nonNull"), "false", "false");
 			if (fieldDef == null) {
+				//System.out.println("fieldName "+fieldName+", fieldScalarType "+fieldScalarType);
 				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldScalarType, fieldPropertyMap);
 				GraphQLSchemaDefinition.putCachedFieldDefinition(fieldDef);
 			}
@@ -240,31 +247,6 @@ public class GraphQLSchemaUtil {
 					});
 					continue;
 				}
-
-				if (argValueMap.get("value") != null)
-					inputFieldsMap.put(argName, argValueMap.get("value"));
-				if (argValueMap.get("op") != null)
-					inputFieldsMap.put(argName + "_op", argValueMap.get("op"));
-				if (argValueMap.get("not") != null)
-					inputFieldsMap.put(argName + "_not", argValueMap.get("not"));
-				if (argValueMap.get("ic") != null)
-					inputFieldsMap.put(argName + "_ic", argValueMap.get("ic"));
-				inputFieldsMap.put("pageIndex", 0);
-				inputFieldsMap.put("pageSize", 20);
-				if (argValueMap.get("pageNoLimit") != null)
-					inputFieldsMap.put("pageNoLimit", argValueMap.get("pageNoLimit"));
-				if (argValueMap.get("orderByField") != null)
-					inputFieldsMap.put("orderByField", argValueMap.get("orderByField"));
-
-				if (argValueMap.get("period") != null)
-					inputFieldsMap.put(argName + "_period", argValueMap.get("period"));
-				if (argValueMap.get("poffset") != null)
-					inputFieldsMap.put(argName + "_poffset", argValueMap.get("poffset"));
-				if (argValueMap.get("from") != null)
-					inputFieldsMap.put(argName + "_from", argValueMap.get("from"));
-				if (argValueMap.get("thru") != null)
-					inputFieldsMap.put(argName + "_thru", argValueMap.get("thru"));
-
 			} else {
 				// periodValid_ type argument is handled specially
 				if (!(argName == "periodValid_" || argName.endsWith("PeriodValid_"))) {
@@ -297,10 +279,59 @@ public class GraphQLSchemaUtil {
 			}
 			String paramType = paramNode.getType();
 			Object paramJavaTypeValue;
-			inParameterMap.put(paramName, entry.getValue());
+			switch (paramType) {
+            case "org.apache.ofbiz.graphql.OperationInputType":
+                paramJavaTypeValue = new OperationInputType((Map)entry.getValue()); break;
+            case "org.apache.ofbiz.graphql.DateRangeInputType":
+                paramJavaTypeValue = new DateRangeInputType((Map)entry.getValue()); break;
+            case "org.apache.ofbiz.graphql.PaginationInputType":
+                paramJavaTypeValue = new PaginationInputType((Map)entry.getValue()); break;
+            default:
+                paramJavaTypeValue = castValueToJavaType(entry.getValue(), paramType); break;
+        }
+			inParameterMap.put(paramName, paramJavaTypeValue);
 		}
 
 	}
+	
+	public static boolean requirePagination(DataFetchingEnvironment environment) {
+		Map<String, Object> arguments = (Map) environment.getArguments();
+		List<Field> fields = (List) environment.getFields();
+		Map paginationArg = (Map) arguments.get("pagination");
+		if (paginationArg != null && (Boolean) paginationArg.get("pageNoLimit")) {
+			return false;
+		}
+		if (paginationArg != null)
+			return true;
+		int count = (int) fields.stream().filter((field) -> field.getName().equals("pageInfo")).count();
+		if (count != 0) {
+			return true;
+		}
+		return false;
+	}
+	
+	
+	static Object castValueToJavaType(Object value, String javaType) {
+        switch (javaType) {
+            case "String": return value;
+            case "CharSequence": return value;
+            case "Date": break; //TODO
+            case "Time": break;  //TODO
+            case "Timestamp": return (Timestamp)value;
+            case "Integer": return (Integer)value;
+            case "Long": return(Long) value;
+            case "BigInteger": return (BigInteger)value;
+            case "Float": return (Float)value;
+            case "Double": return (Double)value;
+            case "BigDecimal": return (BigDecimal)value;
+            case "Boolean": return (Boolean)value;
+            case "List": return (List)value;
+            case "Map": return (Map)value;
+            default:
+                throw new IllegalArgumentException("Can't cast value [${value}] to Java type ${javaType}");
+        }
+        return null;
+    }
 
 	public static void mergeFieldDefinition(Element fieldNode, Map<String, FieldDefinition> fieldDefMap,
 			Delegator delegator, LocalDispatcher dispatcher) {
@@ -371,11 +402,11 @@ public class GraphQLSchemaUtil {
 			entity = delegator.getModelReader().getModelEntity(entityName);
 		} catch (GenericEntityException e) {
 			// TODO Auto-generated catch block
-			e.printStackTrace();
+			//e.printStackTrace();
 		}
-		if (entity == null) {
-			throw new IllegalArgumentException("Entity Definition " + entityName + " not found");
-		}
+//		if (entity == null) {
+//			throw new IllegalArgumentException("Entity Definition " + entityName + " not found");
+//		}
 
 		return entity;
 	}

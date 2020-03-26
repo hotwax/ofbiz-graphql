@@ -18,11 +18,13 @@
  *******************************************************************************/
 package org.apache.ofbiz.graphql.schema;
 
+import static graphql.Scalars.GraphQLBoolean;
+import static graphql.Scalars.GraphQLChar;
+import static graphql.Scalars.GraphQLInt;
 import static graphql.Scalars.GraphQLString;
 import static graphql.schema.GraphQLFieldDefinition.newFieldDefinition;
 import static graphql.schema.GraphQLObjectType.newObject;
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -38,7 +40,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
+import java.util.stream.Collectors;
 import org.apache.ofbiz.base.util.FileUtil;
 import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
@@ -55,7 +57,6 @@ import org.apache.ofbiz.service.LocalDispatcher;
 import org.apache.ofbiz.service.ModelParam;
 import org.apache.ofbiz.service.ModelService;
 import org.w3c.dom.Element;
-
 import graphql.TypeResolutionEnvironment;
 import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
@@ -86,9 +87,6 @@ public class GraphQLSchemaDefinition {
 	protected final Map<String, GraphQLInputType> schemaInputTypeMap = new HashMap<>();
 	protected static final Map<String, GraphQLInputType> graphQLInputTypeMap = new HashMap<>();
 	protected static Map<String, FieldDefinition> fieldDefMap = new HashMap<>();
-	protected static GraphQLInputObjectType paginationInputType;
-	protected static GraphQLInputObjectType operationInputType;
-	protected static GraphQLInputObjectType dateRangeInputType;
 	protected final ArrayList<String> schemaInputTypeNameList = new ArrayList<>();
 	protected final Map<String, String> queryRootFieldMap = new LinkedHashMap<>();
 	protected final Map<String, String> mutationRootFieldMap = new LinkedHashMap<>();
@@ -113,7 +111,6 @@ public class GraphQLSchemaDefinition {
 
 	protected LinkedList<GraphQLTypeDefinition> allTypeDefSortedList = new LinkedList<>();
 	protected Map<String, GraphQLTypeDefinition> requiredTypeDefMap = new LinkedHashMap<>();
-	protected static GraphQLInputObjectField clientMutationIdInputField;
 
 	protected static Set<String> interfaceResolverTypeSet = new HashSet<>();
 
@@ -122,6 +119,16 @@ public class GraphQLSchemaDefinition {
 	protected static final String IS_LIST_SUFFIX = "_2";
 	protected static final String LIST_ITEM_NON_NULL_SUFFIX = "_3";
 	protected static final String REQUIRED_SUFFIX = "_a";
+	
+	protected static GraphQLObjectType pageInfoType;
+    protected static GraphQLInputObjectType paginationInputType;
+    protected static GraphQLInputObjectType operationInputType;
+    protected static GraphQLInputObjectType dateRangeInputType;
+    protected static GraphQLFieldDefinition cursorField;
+    protected static GraphQLFieldDefinition clientMutationIdField;
+    protected static GraphQLArgument paginationArgument;
+    protected static GraphQLArgument ifArgument;
+    protected static GraphQLInputObjectField clientMutationIdInputField;
 
 	static {
 		createPredefinedGraphQLTypes();
@@ -134,9 +141,84 @@ public class GraphQLSchemaDefinition {
 			graphQLOutputTypeMap.put(entry.getKey(), entry.getValue());
 		}
 
+		GraphQLFieldDefinition.Builder cursorFieldBuilder = GraphQLFieldDefinition.newFieldDefinition().name("cursor")
+                .type(GraphQLString);
+        for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet()) cursorFieldBuilder.argument(entry.getValue());
+        cursorField = cursorFieldBuilder.build();
+        graphQLFieldMap.put("cursor" + KEY_SPLITTER + "String", cursorField);
+        
+        
+        GraphQLFieldDefinition.Builder clientMutationIdFieldBuilder = GraphQLFieldDefinition.newFieldDefinition()
+                .name("clientMutationId").type(GraphQLString);
+        for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet()) clientMutationIdFieldBuilder.argument(entry.getValue());
+        clientMutationIdField = clientMutationIdFieldBuilder.build();
+        graphQLFieldMap.put("clientMutationId" + KEY_SPLITTER + "String", clientMutationIdField);
+        
+        ifArgument = GraphQLArgument.newArgument().name("if")
+                .type(GraphQLBoolean).description("Directive @if").build();
+        graphQLDirectiveArgumentMap.put("if", ifArgument);
+        
+        // Predefined GraphQLObject
+        pageInfoType = GraphQLObjectType.newObject().name("GraphQLPageInfo")
+                .field(getGraphQLFieldWithNoArgs("pageIndex", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("pageSize", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("totalCount", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("pageMaxIndex", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("pageRangeLow", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("pageRangeHigh", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("hasPreviousPage", GraphQLBoolean, "hasPreviousPage will be false if the client is not paginating with last, or if the client is paginating with last, and the server has determined that the client has reached the end of the set of edges defined by their cursors."))
+                .field(getGraphQLFieldWithNoArgs("hasNextPage", GraphQLBoolean, "hasNextPage will be false if the client is not paginating with first, or if the client is paginating with first, and the server has determined that the client has reached the end of the set of edges defined by their cursors"))
+                .field(getGraphQLFieldWithNoArgs("startCursor", GraphQLString, ""))
+                .field(getGraphQLFieldWithNoArgs("endCursor", GraphQLString, ""))
+                .build();
+        graphQLObjectTypeMap.put("GraphQLPageInfo", pageInfoType);
+        graphQLOutputTypeMap.put("GraphQLPageInfo", pageInfoType);
+        
+        
+        // Predefined GraphQLInputObject
+        paginationInputType = GraphQLInputObjectType.newInputObject().name("PaginationInputType")
+                .field(createPredefinedInputField("pageIndex", GraphQLInt, 0, "Page index for pagination, default 0"))
+                .field(createPredefinedInputField("pageSize", GraphQLInt, 20, "Page size for pagination, default 20"))
+                .field(createPredefinedInputField("pageNoLimit", GraphQLBoolean, false, "Page no limit for pagination, default false"))
+                .field(createPredefinedInputField("orderByField", GraphQLString, null, "OrderBy field for pagination. \ne.g. \n" +
+                                     "productName \n" + "productName,statusId \n" + "-statusId,productName"))
+                .field(createPredefinedInputField("first", GraphQLInt, 20, "Forward pagination argument takes a non‐negative integer, default 20"))
+                .field(createPredefinedInputField("after", GraphQLString, null, "Forward pagination argument takes the cursor, default null"))
+                .field(createPredefinedInputField("last", GraphQLInt, 20, "Backward pagination argument takes a non‐negative integer, default 20"))
+                .field(createPredefinedInputField("before", GraphQLString, null, "Backward pagination argument takes the cursor, default null"))
+                .field(createPredefinedInputField("type", GraphQLString, null, "Pagination type either 'offset' or 'cursor'"))
+                .build();
+        graphQLInputTypeMap.put("PaginationInputType", paginationInputType);
+        
+        operationInputType = GraphQLInputObjectType.newInputObject().name("OperationInputType")
+                .field(createPredefinedInputField("op", GraphQLString, null, "Operation on field, one of [ equals | like | contains | begins | empty | in ]"))
+                .field(createPredefinedInputField("value", GraphQLString, null, "Argument value"))
+                .field(createPredefinedInputField("not", GraphQLString, null, "Not operation, one of [ Y | true ] represents true"))
+                .field(createPredefinedInputField("ic", GraphQLString, null, "Case insensitive, one of [ Y | true ] represents true"))
+                .build();
+        graphQLInputTypeMap.put("OperationInputType", operationInputType);
+
+        dateRangeInputType = GraphQLInputObjectType.newInputObject().name("DateRangeInputType")
+                .field(createPredefinedInputField("period", GraphQLChar, null, ""))
+                .field(createPredefinedInputField("poffset", GraphQLChar, null, ""))
+                .field(createPredefinedInputField("from", GraphQLChar, null, ""))
+                .field(createPredefinedInputField("thru", GraphQLChar, null, ""))
+                .build();
+        graphQLInputTypeMap.put("DateRangeInputType", dateRangeInputType);
+
+        paginationArgument = GraphQLArgument.newArgument().name("pagination")
+                .type(paginationInputType)
+                .description("pagination").build();
+        graphQLArgumentMap.put(getArgumentKey("pagination", paginationInputType.getName()), paginationArgument);
+		
 		clientMutationIdInputField = GraphQLInputObjectField.newInputObjectField().name("clientMutationId")
 				.type(GraphQLString).description("A unique identifier for the client performing the mutation.").build();
 		graphQLInputObjectFieldMap.put("clientMutationId", clientMutationIdInputField);
+	}
+	
+	private static GraphQLInputObjectField createPredefinedInputField(String name, GraphQLInputType type, Object defaultValue, String description) {
+		GraphQLInputObjectField.Builder fieldBuilder = GraphQLInputObjectField.newInputObjectField().name(name).type(type).defaultValue(defaultValue).description(description);
+		return fieldBuilder.build();
 	}
 
 	static class TreeNode<T> {
@@ -275,9 +357,7 @@ public class GraphQLSchemaDefinition {
 	public GraphQLSchemaDefinition(Delegator delegator, LocalDispatcher dispatcher, Map<String, Element> schemaMap) {
 		this.delegator = delegator;
 		this.dispatcher = dispatcher;
-
 		GraphQLSchemaUtil.createObjectTypeNodeForAllEntities(delegator, dispatcher, allTypeDefMap);
-
 		schemaMap.forEach((k, v) -> {
 			Element schemaElement = v;
 			List<? extends Element> elements = UtilXml.childElementList(schemaElement, "interface-fetcher");
@@ -292,9 +372,9 @@ public class GraphQLSchemaDefinition {
 			String rootFieldName = schemaElement.getAttribute("name");
 			String rootQueryTypeName = schemaElement.getAttribute("query");
 			String rootMutationTypeName = schemaElement.getAttribute("mutation");
-			if (rootQueryTypeName != null)
+			if (!rootQueryTypeName.isEmpty())
 				queryRootFieldMap.put(rootFieldName, rootQueryTypeName);
-			if (rootMutationTypeName != null)
+			if (!rootMutationTypeName.isEmpty())
 				mutationRootFieldMap.put(rootFieldName, rootMutationTypeName);
 
 			List<? extends Element> elements = UtilXml.childElementList(schemaElement);
@@ -408,12 +488,9 @@ public class GraphQLSchemaDefinition {
 			// Map<String, String> fieldPropertyMap = [nonNull: "true"]
 			Map<String, String> fieldPropertyMap = new HashMap<>();
 			fieldPropertyMap.put("nonNull", "true");
-			FieldDefinition fieldDef = getCachedFieldDefinition(fieldName, fieldTypeName,
-					fieldPropertyMap.get("nonNull"), "false", "false");
+			FieldDefinition fieldDef = getCachedFieldDefinition(fieldName, fieldTypeName, fieldPropertyMap.get("nonNull"), "false", "false");
 			if (fieldDef == null) {
 				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldTypeName, fieldPropertyMap);
-				// fieldDef = new FieldDefinition(ecf, fieldName, fieldTypeName,
-				// fieldPropertyMap)
 				fieldDef.setDataFetcher(new EmptyDataFetcher(fieldDef));
 				putCachedFieldDefinition(fieldDef);
 			}
@@ -426,17 +503,14 @@ public class GraphQLSchemaDefinition {
 			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, "empty", "String", fieldPropertyMap);
 			fieldDefMap.put("empty", fieldDef);
 		}
-		ObjectTypeDefinition objectTypeDef = new ObjectTypeDefinition(delegator, dispatcher, rootObjectTypeName, "",
-				new ArrayList<String>(), fieldDefMap);
+		ObjectTypeDefinition objectTypeDef = new ObjectTypeDefinition(delegator, dispatcher, rootObjectTypeName, "", new ArrayList<String>(), fieldDefMap);
 		allTypeDefMap.put(rootObjectTypeName, objectTypeDef);
 	}
 
 	protected static void putCachedFieldDefinition(FieldDefinition fieldDef) {
-		String fieldKey = getFieldKey(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
-				fieldDef.listItemNonNull);
+		String fieldKey = getFieldKey(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList, fieldDef.listItemNonNull);
 		if (fieldDefMap.get(fieldKey) != null)
-			throw new IllegalArgumentException(
-					"FieldDefinition [${fieldDef.name} - ${fieldDef.type}] already exists in cache");
+			throw new IllegalArgumentException("FieldDefinition [${fieldDef.name} - ${fieldDef.type}] already exists in cache");
 		fieldDefMap.put(fieldKey, fieldDef);
 	}
 
@@ -448,7 +522,6 @@ public class GraphQLSchemaDefinition {
 		Delegator delegator;
 		LocalDispatcher dispatcher;
 		String convertFromObjectTypeName;
-
 		String typeResolver;
 		Map<String, FieldDefinition> fieldDefMap = new LinkedHashMap<>();
 		String resolverField;
@@ -468,15 +541,13 @@ public class GraphQLSchemaDefinition {
 					this.description = childNode.getTextContent();
 					break;
 				case "field":
-					fieldDefMap.put(childNode.getAttribute("name"),
-							new FieldDefinition(delegator, dispatcher, childNode));
+					fieldDefMap.put(childNode.getAttribute("name"), new FieldDefinition(delegator, dispatcher, childNode));
 					break;
 				}
 			}
 		}
 
-		InterfaceTypeDefinition(ObjectTypeDefinition objectTypeDef, ExtendObjectDefinition extendObjectDef,
-				Delegator delegator) {
+		InterfaceTypeDefinition(ObjectTypeDefinition objectTypeDef, ExtendObjectDefinition extendObjectDef, Delegator delegator) {
 			this.convertFromObjectTypeName = objectTypeDef.name;
 			this.delegator = delegator;
 			this.name = objectTypeDef.name + "Interface";
@@ -525,7 +596,6 @@ public class GraphQLSchemaDefinition {
 
 	static abstract class GraphQLTypeDefinition {
 		String name, description, type;
-
 		abstract List<String> getDependentTypes();
 	}
 
@@ -558,8 +628,7 @@ public class GraphQLSchemaDefinition {
 			}
 		}
 
-		ObjectTypeDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String description,
-				List<String> interfaceList, Map<String, FieldDefinition> fieldDefMap) {
+		ObjectTypeDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String description, List<String> interfaceList, Map<String, FieldDefinition> fieldDefMap) {
 			this.name = name;
 			this.description = description;
 			this.type = "object";
@@ -591,22 +660,18 @@ public class GraphQLSchemaDefinition {
 					String interfaceDef = childNode.getAttribute("name");
 					GraphQLTypeDefinition interfaceTypeDef = allTypeDefMap.get(interfaceDef);
 					if (interfaceTypeDef == null)
-						throw new IllegalArgumentException("Extend object " + extendObjectDef.name
-								+ ", but interface definition [" + interfaceDef + "] not found");
+						throw new IllegalArgumentException("Extend object " + extendObjectDef.name + ", but interface definition [" + interfaceDef + "] not found");
 					if (!(interfaceTypeDef instanceof InterfaceTypeDefinition))
-						throw new IllegalArgumentException(
-								"Extend object ${extendObjectDef.name}, but interface definition [${childNode.attribute('name')}] is not instance of InterfaceTypeDefinition");
+						throw new IllegalArgumentException("Extend object ${extendObjectDef.name}, but interface definition [${childNode.attribute('name')}] is not instance of InterfaceTypeDefinition");
 					extendInterface((InterfaceTypeDefinition) interfaceTypeDef, childNode);
 				}
 			}
-
 			for (Element extendObjectNode : extendObjectDef.extendObjectNodeList) {
 				List<? extends Element> objectElements = UtilXml.childElementList(extendObjectNode, "field");
 				for (Element childNode : objectElements) {
 					GraphQLSchemaUtil.mergeFieldDefinition(childNode, fieldDefMap, delegator, dispatcher);
 				}
 			}
-
 			for (String excludeFieldName : extendObjectDef.excludeFields)
 				fieldDefMap.remove(excludeFieldName);
 		}
@@ -626,8 +691,7 @@ public class GraphQLSchemaDefinition {
 	static String getArgumentTypeName(String type, String fieldIsList) {
 		if (!"true".equals(fieldIsList))
 			return type;
-		if (GraphQLSchemaUtil.graphQLStringTypes.contains(type) || GraphQLSchemaUtil.graphQLNumericTypes.contains(type)
-				|| GraphQLSchemaUtil.graphQLDateTypes.contains(type))
+		if (GraphQLSchemaUtil.graphQLStringTypes.contains(type) || GraphQLSchemaUtil.graphQLNumericTypes.contains(type) || GraphQLSchemaUtil.graphQLDateTypes.contains(type))
 			return operationInputType.getName();
 		if (GraphQLSchemaUtil.graphQLDateTypes.contains(type))
 			return dateRangeInputType.getName();
@@ -641,21 +705,17 @@ public class GraphQLSchemaDefinition {
 
 	static String getArgumentKey(String name, String type, String required) {
 		String argumentKey = name + KEY_SPLITTER + type;
-		if ("true".equals(required))
-			argumentKey = argumentKey + REQUIRED_SUFFIX;
+		if ("true".equals(required))argumentKey = argumentKey + REQUIRED_SUFFIX;
 		return argumentKey;
 	}
 
 	static void putCachedArgumentDefinition(ArgumentDefinition argDef) {
-		if (!(GraphQLSchemaUtil.graphQLScalarTypes.containsKey(argDef.getType())
-				|| dateRangeInputType.getName().equals(argDef.getType())
-				|| operationInputType.getName().equals(argDef.getType())))
+		if (!(GraphQLSchemaUtil.graphQLScalarTypes.containsKey(argDef.getType()) || dateRangeInputType.getName().equals(argDef.getType()) || operationInputType.getName().equals(argDef.getType())))
 			return;
 
 		String argumentKey = getArgumentKey(argDef.name, argDef.getType(), argDef.getRequired());
 		if (argumentDefMap.get(argumentKey) != null)
-			throw new IllegalArgumentException(
-					"ArgumentDefinition [" + argDef.name + " - " + argDef.getType() + "] already exists in cache");
+			throw new IllegalArgumentException("ArgumentDefinition [" + argDef.name + " - " + argDef.getType() + "] already exists in cache");
 		argumentDefMap.put(argumentKey, argDef);
 	}
 
@@ -720,15 +780,17 @@ public class GraphQLSchemaDefinition {
 
 		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
 				Map<String, String> fieldPropertyMap, BaseDataFetcher dataFetcher, List<String> excludedArguments) {
+			this.delegator = delegator;
 			this.name = name;
 			this.type = type;
 			this.dataFetcher = dataFetcher;
 			this.nonNull = fieldPropertyMap.get("nonNull") != null ? fieldPropertyMap.get("nonNull") : "false";
 			this.isList = fieldPropertyMap.get("isList") != null ? fieldPropertyMap.get("isList") : "false";
-			this.listItemNonNull = fieldPropertyMap.get("listItemNonNull") != null
-					? fieldPropertyMap.get("listItemNonNull")
-					: "false";
+			this.listItemNonNull = fieldPropertyMap.get("listItemNonNull") != null ? fieldPropertyMap.get("listItemNonNull") : "false";
 			this.description = fieldPropertyMap.get("description");
+			addEntityAutoArguments(excludedArguments, new HashMap<String, String>());
+            //updateArgumentDefs();
+            addPeriodValidArguments();
 		}
 
 		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, Element node) {
@@ -739,9 +801,7 @@ public class GraphQLSchemaDefinition {
 			this.description = node.getAttribute("description");
 			this.nonNull = node.getAttribute("non-null") != null ? node.getAttribute("non-null") : "false";
 			this.isList = node.getAttribute("is-list") != null ? node.getAttribute("is-list") : "false";
-			this.listItemNonNull = node.getAttribute("list-item-non-null") != null
-					? node.getAttribute("list-item-non-null")
-					: "false";
+			this.listItemNonNull = node.getAttribute("list-item-non-null") != null ? node.getAttribute("list-item-non-null") : "false";
 			this.isMutation = "mutation".equals(node.getAttribute("for"));
 
 			String dataFetcherType = "";
@@ -754,8 +814,7 @@ public class GraphQLSchemaDefinition {
 					break;
 				case "argument":
 					String argTypeName = getArgumentTypeName(childNode.getAttribute("type"), this.isList);
-					ArgumentDefinition argDef = getCachedArgumentDefinition(childNode.getAttribute("name"), argTypeName,
-							childNode.getAttribute("required"));
+					ArgumentDefinition argDef = getCachedArgumentDefinition(childNode.getAttribute("name"), argTypeName, childNode.getAttribute("required"));
 					if (argDef == null) {
 						argDef = new ArgumentDefinition(childNode, this);
 						putCachedArgumentDefinition(argDef);
@@ -770,8 +829,7 @@ public class GraphQLSchemaDefinition {
 				case "interface-fetcher":
 					dataFetcherType = "interface";
 					dataFetcherNode = childNode;
-					String refName = childNode.getAttribute("ref") != null ? childNode.getAttribute("ref")
-							: "NOT_EXIST";
+					String refName = childNode.getAttribute("ref") != null ? childNode.getAttribute("ref") : "NOT_EXIST";
 					Element refNode = interfaceFetcherNodeMap.get(refName);
 					this.dataFetcher = new InterfaceDataFetcher(childNode, refNode, this, delegator, dispatcher);
 					break;
@@ -791,13 +849,35 @@ public class GraphQLSchemaDefinition {
 			Map<String, String> keyMap = getDataFetcherKeyMap(dataFetcherNode, delegator);
 			switch (dataFetcherType) {
 			case "entity":
-				break;
+			case "interface":
+                addEntityAutoArguments(new ArrayList<String>(), keyMap);
+                addPeriodValidArguments();
+                //updateArgumentDefs(); TODO
+                break;	
 			case "service":
 				if (isMutation)
 					addInputArgument();
 				else
 					addQueryAutoArguments(dataFetcherNode, keyMap, dispatcher);
 				break;
+			}
+		}
+		
+		private void addPeriodValidArguments() {
+			if (!"true".equals(isList))
+				return;
+
+			List<String> allArguments = new ArrayList<String>(argumentDefMap.keySet());
+			List<String> fromDateArguments = allArguments.stream().filter((argument) -> argument.equals("fromDate") || argument.endsWith("FromDate")).collect(Collectors.toList());
+			List<String> pairedFromDateArguments = fromDateArguments.stream().filter((argument) -> (argument.equals("fromDate") && allArguments.contains("thruDate")) || allArguments.contains(argument.replace("FromDate", "ThruDate"))).collect(Collectors.toList());
+			for (String argument : pairedFromDateArguments) {
+				String periodValidArgName = argument == "fromDate" ? "periodValid_" : argument.replace("FromDate", "PeriodValid_");
+				ArgumentDefinition argumentDef = getCachedArgumentDefinition(periodValidArgName, "Boolean", null);
+				if (argumentDef == null) {
+					argumentDef = new ArgumentDefinition(this, periodValidArgName, "Boolean", null, null, "");
+					putCachedArgumentDefinition(argumentDef);
+				}
+				argumentDefMap.put(periodValidArgName, argumentDef);
 			}
 		}
 
@@ -808,8 +888,7 @@ public class GraphQLSchemaDefinition {
 		ArgumentDefinition mergeArgument(final String argumentName, Map<String, String> attributeMap) {
 			ArgumentDefinition baseArgumentDef = argumentDefMap.get(argumentName);
 			if (baseArgumentDef == null) {
-				baseArgumentDef = getCachedArgumentDefinition(argumentName, attributeMap.get("type"),
-						attributeMap.get("required"));
+				baseArgumentDef = getCachedArgumentDefinition(argumentName, attributeMap.get("type"), attributeMap.get("required"));
 				if (baseArgumentDef == null) {
 					baseArgumentDef = new ArgumentDefinition(this, argumentName, attributeMap);
 					putCachedArgumentDefinition(baseArgumentDef);
@@ -842,19 +921,14 @@ public class GraphQLSchemaDefinition {
 						}
 					}
 					if (relFn == null)
-						throw new IllegalArgumentException(
-								"The key-map.@related of Entity ${entityName} should be specified");
+						throw new IllegalArgumentException("The key-map.@related of Entity ${entityName} should be specified");
 					keyMap.put(fieldName, relFn);
 				}
-
 			} else {
 				for (Element keyMapNode : elements)
-					keyMap.put(keyMapNode.getAttribute("field-name"),
-							keyMapNode.getAttribute("related") != null ? keyMapNode.getAttribute("related")
-									: keyMapNode.getAttribute("field-name"));
+					keyMap.put(keyMapNode.getAttribute("field-name"), keyMapNode.getAttribute("related") != null ? keyMapNode.getAttribute("related") : keyMapNode.getAttribute("field-name"));
 			}
 			return keyMap;
-
 		}
 
 		private void addQueryAutoArguments(Element serviceFetcherNode, Map<String, String> keyMap,
@@ -866,8 +940,7 @@ public class GraphQLSchemaDefinition {
 			try {
 				ModelService service = dispatcher.getDispatchContext().getModelService(serviceName);
 				if (service == null)
-					throw new IllegalArgumentException(
-							"Service [" + serviceName + "] for field [" + name + "] not found");
+					throw new IllegalArgumentException("Service [" + serviceName + "] for field [" + name + "] not found");
 
 				for (ModelParam modelParam : service.getInModelParamList()) {
 
@@ -886,6 +959,9 @@ public class GraphQLSchemaDefinition {
 					boolean argIsList = false;
 					String argType;
 					switch (paramType) {
+					case "org.apache.ofbiz.graphql.OperationInputType": argType = "OperationInputType"; break;
+	                case "org.apache.ofbiz.graphql.DateRangeInputType": argType = "DateRangeInputType"; break;
+	                case "org.apache.ofbiz.graphql.PaginationInputType": argType = "PaginationInputType"; break;
 					case "List":
 						argIsList = true;
 						argType = GraphQLSchemaUtil.camelCaseToUpperCamel(this.name) + "_" + paramName;
@@ -917,6 +993,37 @@ public class GraphQLSchemaDefinition {
 			}
 
 		}
+		
+		 private void addEntityAutoArguments(List<String> excludedFields, Map<String, String> explicitKeyMap) {
+	            if (isMutation) return;
+	            if (GraphQLSchemaUtil.graphQLScalarTypes.keySet().contains(type) || graphQLDirectiveArgumentMap.keySet().contains(type)) return;
+	          
+	            ModelEntity entity = GraphQLSchemaUtil.getEntityDefinition(type, delegator);
+
+	            if(UtilValidate.isEmpty(entity)) {
+	            	return ;
+	            }
+	            List<String> fieldNames = new ArrayList<>();
+	            if ("true".equals(isList)) fieldNames.addAll(entity.getAllFieldNames());
+	            else fieldNames.addAll(entity.getPkFieldNames());
+
+	            fieldNames.removeAll(explicitKeyMap.values());
+
+	            for (String fieldName : fieldNames) {
+	                if (excludedFields.contains(fieldName)) continue;
+	                ModelField fi =entity.getField(fieldName);
+	                String fieldDescription = fi.getDescription();
+	                // Add fields in entity as argument
+	                String argType = getArgumentTypeName(GraphQLSchemaUtil.fieldTypeGraphQLMap.get(fi.getType()), isList);
+
+	                ArgumentDefinition argumentDef = getCachedArgumentDefinition(fi.getName(), argType, null);
+	                if (argumentDef == null) {
+	                    argumentDef = new ArgumentDefinition(this, fi.getName(), argType, null, null, fieldDescription);
+	                    putCachedArgumentDefinition(argumentDef);
+	                }
+	                argumentDefMap.put(fi.getName(), argumentDef);
+	            }
+	        }
 
 		List<ArgumentDefinition> getArgumentList() {
 			List<ArgumentDefinition> argumentList = new LinkedList<>();
@@ -1140,9 +1247,9 @@ public class GraphQLSchemaDefinition {
 			schemaInputTypeMap.put(entry.getKey(), entry.getValue());
 		}
 
-		// schemaInputTypeMap.put(paginationInputType.getName(), paginationInputType);
-		// schemaInputTypeMap.put(operationInputType.getName(), operationInputType);
-		// schemaInputTypeMap.put(dateRangeInputType.getName(), dateRangeInputType);
+		schemaInputTypeMap.put(paginationInputType.getName(), paginationInputType);
+		schemaInputTypeMap.put(operationInputType.getName(), operationInputType);
+		schemaInputTypeMap.put(dateRangeInputType.getName(), dateRangeInputType);
 
 		// Add explicitly defined input types from *.graphql.xml
 		for (String inputTypeName : schemaInputTypeNameList) {
@@ -1228,6 +1335,11 @@ public class GraphQLSchemaDefinition {
 	public GraphQLSchema generateSchema() {
 		addSchemaInputTypes();
 		populateSortedTypes();
+//		System.out.println("allTypeDefSortedList "+allTypeDefSortedList);
+//		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
+//			System.out.println("objectDef : "+((ObjectTypeDefinition) typeDef).name+", type "+((ObjectTypeDefinition) typeDef).type);
+//		}
+		
 		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
 			switch (typeDef.type) {
 			case "interface":
@@ -1316,9 +1428,7 @@ public class GraphQLSchemaDefinition {
 			queryObjectTypeBuilder = queryObjectTypeBuilder.field(buildSchemaField(fieldDef));
 
 		// create a fake object type
-		GraphQLObjectType.Builder graphQLObjectTypeBuilder = GraphQLObjectType.newObject()
-				.name("FakeTypeReferenceContainer").description(
-						"This is only for contain GraphQLTypeReference so GraphQLSchema includes all of GraphQLTypeReference.");
+		GraphQLObjectType.Builder graphQLObjectTypeBuilder = GraphQLObjectType.newObject().name("TypeReferenceContainer").description("This is only for contain GraphQLTypeReference so GraphQLSchema includes all of GraphQLTypeReference.");
 
 		boolean hasFakeField = false;
 		List<String> fakeFieldNameList = new ArrayList<>();
@@ -1351,8 +1461,7 @@ public class GraphQLSchemaDefinition {
 
 		if (hasFakeField) {
 			GraphQLObjectType fakeObjectType = graphQLObjectTypeBuilder.build();
-			GraphQLFieldDefinition fakeField = GraphQLFieldDefinition.newFieldDefinition()
-					.name("fakeTypeReferenceContainer").type(fakeObjectType).build();
+			GraphQLFieldDefinition fakeField = GraphQLFieldDefinition.newFieldDefinition().name("typeReferenceContainer").type(fakeObjectType).build();
 			queryObjectTypeBuilder.field(fakeField);
 		}
 
@@ -1373,15 +1482,15 @@ public class GraphQLSchemaDefinition {
 		for (String interfaceName : objectTypeDef.interfaceList) {
 			GraphQLInterfaceType interfaceType = graphQLInterfaceTypeMap.get(interfaceName);
 			if (interfaceType == null)
-				throw new IllegalArgumentException("GraphQLInterfaceType [" + interfaceName
-						+ "] for GraphQLObjectType [" + objectTypeName + "] not found.");
+				throw new IllegalArgumentException("GraphQLInterfaceType [" + interfaceName + "] for GraphQLObjectType [" + objectTypeName + "] not found.");
 
 			objectTypeBuilder = objectTypeBuilder.withInterface(interfaceType);
 		}
 
-		for (FieldDefinition fieldDef : objectTypeDef.getFieldList())
+		for (FieldDefinition fieldDef : objectTypeDef.getFieldList()) {
 			objectTypeBuilder = objectTypeBuilder.field(buildSchemaField(fieldDef));
-
+		}
+			
 		objectType = objectTypeBuilder.build();
 		graphQLObjectTypeMap.put(objectTypeName, objectType);
 		graphQLOutputTypeMap.put(objectTypeName, objectType);
@@ -1389,23 +1498,28 @@ public class GraphQLSchemaDefinition {
 
 	private static GraphQLFieldDefinition buildSchemaField(FieldDefinition fieldDef) {
 		GraphQLFieldDefinition graphQLFieldDef;
-		System.out.println("fieldDef.name "+fieldDef.name);
-		System.out.println("Argument: "+fieldDef.getArgumentList().size());
-
 		if (fieldDef.getArgumentList().size() == 0 && GraphQLSchemaUtil.graphQLScalarTypes.containsKey(fieldDef.type)) {
-			System.out.println("Returning here for "+fieldDef.name);
 			return getGraphQLFieldWithNoArgs(fieldDef);
 		}
 
-		GraphQLOutputType fieldType = getGraphQLOutputType(fieldDef);
-		GraphQLFieldDefinition.Builder graphQLFieldDefBuilder = GraphQLFieldDefinition.newFieldDefinition()
-				.name(fieldDef.name).type(fieldType).description(fieldDef.description);
-
-		
+		GraphQLOutputType fieldType;
+		if ("true".equals(fieldDef.isList)) {
+			fieldType = getConnectionObjectType(fieldDef.type, fieldDef.nonNull, fieldDef.listItemNonNull);
+		} else {
+			fieldType = getGraphQLOutputType(fieldDef);
+		}
+		GraphQLFieldDefinition.Builder graphQLFieldDefBuilder = GraphQLFieldDefinition.newFieldDefinition().name(fieldDef.name).type(fieldType).description(fieldDef.description);
 		
 		// build arguments for field
 		for (ArgumentDefinition argNode : fieldDef.getArgumentList())
 			graphQLFieldDefBuilder.argument(buildSchemaArgument(argNode));
+
+		// Add pagination argument
+		if ("true".equals(fieldDef.isList))
+			graphQLFieldDefBuilder.argument(paginationArgument);
+		// Add directive arguments
+		for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet())
+			graphQLFieldDefBuilder.argument(entry.getValue());
 
 		// TO-DO - Use of method is deprecated. Need to replace it with coderegistry
 		// implementation.
@@ -1420,8 +1534,7 @@ public class GraphQLSchemaDefinition {
 		return getGraphQLOutputType(fieldDef.type, fieldDef.nonNull, fieldDef.isList, fieldDef.listItemNonNull);
 	}
 
-	private static GraphQLOutputType getGraphQLOutputType(String rawTypeName, String nonNull, String isList,
-			String listItemNonNull) {
+	private static GraphQLOutputType getGraphQLOutputType(String rawTypeName, String nonNull, String isList, String listItemNonNull) {
 		GraphQLOutputType rawType = graphQLOutputTypeMap.get(rawTypeName);
 		if (rawType == null) {
 			rawType = graphQLTypeReferenceMap.get(rawTypeName);
@@ -1465,24 +1578,21 @@ public class GraphQLSchemaDefinition {
 
 	private static GraphQLArgument buildSchemaArgument(ArgumentDefinition argumentDef) {
 		String argumentName = argumentDef.getName();
-		GraphQLArgument.Builder argument = GraphQLArgument.newArgument().name(argumentName)
-				.description(argumentDef.getDescription());
+		GraphQLArgument.Builder argument = GraphQLArgument.newArgument().name(argumentName).description(argumentDef.getDescription());
 
 		if (UtilValidate.isNotEmpty(argumentDef.getDefaultValue()))
 			argument.defaultValue(argumentDef.getDefaultValue());
 
 		GraphQLInputType argType = graphQLInputTypeMap.get(argumentDef.getType());
 		if (argType == null)
-			throw new IllegalArgumentException(
-					"GraphQLInputType [" + argumentDef.getType() + "] for argument [" + argumentName + "] not found");
+			throw new IllegalArgumentException("GraphQLInputType [" + argumentDef.getType() + "] for argument [" + argumentName + "] not found");
 
 		if (argumentDef.isList) {
 			argType = new GraphQLList(argType);
 		}
 
-		if (argumentDef.getRequired().equalsIgnoreCase("true")) {
+		if (argumentDef.getRequired() != null && argumentDef.getRequired().equalsIgnoreCase("true")) {
 			argument = argument.type(new GraphQLNonNull(argType));
-
 		} else {
 			argument = argument.type(argType);
 		}
@@ -1491,8 +1601,7 @@ public class GraphQLSchemaDefinition {
 
 	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(FieldDefinition fieldDef) {
 		if (fieldDef.getArgumentList().size() > 0)
-			throw new IllegalArgumentException(
-					"FieldDefinition [${fieldDef.name}] with type [${fieldDef.type}] has arguments, which should not be cached");
+			throw new IllegalArgumentException("FieldDefinition [" + fieldDef.name + " ] with type [" + fieldDef.type + "] has arguments, which should not be cached");
 		return getGraphQLFieldWithNoArgs(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
 				fieldDef.listItemNonNull, fieldDef.description, fieldDef.dataFetcher);
 	}
@@ -1529,7 +1638,13 @@ public class GraphQLSchemaDefinition {
 			return field;
 
 		GraphQLOutputType fieldType = null;
-		fieldType = getGraphQLOutputType(rawType, nonNull, "false", listItemNonNull);
+		
+		if ("true".equals(isList)) {
+			fieldType = getConnectionObjectType(rawType, nonNull, listItemNonNull);
+		} else {
+			fieldType = getGraphQLOutputType(rawType, nonNull, "false", listItemNonNull);
+		}
+		
 		GraphQLFieldDefinition.Builder fieldBuilder = GraphQLFieldDefinition.newFieldDefinition().name(name)
 				.description(description);
 		for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet())
@@ -1537,6 +1652,7 @@ public class GraphQLSchemaDefinition {
 
 		fieldBuilder.type(fieldType);
 
+		if ("true".equals(isList)) fieldBuilder.argument(paginationArgument);
 		for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet())
 			fieldBuilder.argument((GraphQLArgument) entry.getValue());
 
@@ -1547,6 +1663,105 @@ public class GraphQLSchemaDefinition {
 		graphQLFieldMap.put(fieldKey, field);
 		return field;
 	}
+	
+	private static GraphQLOutputType getConnectionObjectType(String rawTypeName, String nonNull, String listItemNonNull) {
+        GraphQLOutputType rawType = graphQLOutputTypeMap.get(rawTypeName);
+        if (rawType == null) {
+            rawType = graphQLTypeReferenceMap.get(rawTypeName);
+            if (rawType == null) {
+                rawType = new GraphQLTypeReference(rawTypeName);
+                System.out.println("Adding graphQLTypeReferenceMap: ${rawTypeName}");
+                graphQLTypeReferenceMap.put(rawTypeName, (GraphQLTypeReference) rawType);
+
+            }
+        }
+        return getConnectionObjectType(rawType, nonNull, listItemNonNull);
+    }
+
+    private static GraphQLOutputType getConnectionObjectType(GraphQLOutputType rawType, String nonNull, String listItemNonNull) {
+        String connectionTypeName = rawType.getName() + "Connection";
+        String connectionTypeKey = rawType.getName();
+        if ("true".equals(nonNull)) connectionTypeKey = connectionTypeKey + NON_NULL_SUFFIX;
+        connectionTypeKey = connectionTypeKey + IS_LIST_SUFFIX;
+        if ("true".equals(listItemNonNull)) connectionTypeKey = connectionTypeKey + LIST_ITEM_NON_NULL_SUFFIX;
+
+        GraphQLOutputType wrappedConnectionType = graphQLOutputTypeMap.get(connectionTypeKey);
+        if (wrappedConnectionType != null) return wrappedConnectionType;
+
+        GraphQLOutputType connectionType = graphQLOutputTypeMap.get(connectionTypeName);
+        if (connectionType == null) {
+            connectionType = GraphQLObjectType.newObject().name(connectionTypeName)
+                    .field(getEdgesField(rawType, nonNull, listItemNonNull))
+                    .field(getGraphQLFieldWithNoArgs("pageInfo", pageInfoType, "true", "false", "false", null))
+                    .build();
+            graphQLOutputTypeMap.put(connectionTypeName, connectionType);
+        }
+
+        wrappedConnectionType = connectionType;
+        if ("true".equals(nonNull)) wrappedConnectionType = new GraphQLNonNull(connectionType);
+
+        if (!connectionTypeKey.equals(connectionTypeName)) graphQLOutputTypeMap.put(connectionTypeKey, wrappedConnectionType);
+
+        return wrappedConnectionType;
+    }
+	
+    private static GraphQLFieldDefinition getEdgesField(GraphQLOutputType rawType, String nonNull, String listItemNonNull) {
+        String edgesFieldName = "edges";
+        String edgeFieldKey = edgesFieldName + KEY_SPLITTER + rawType.getName() + "Edge";
+        if ("true".equals(nonNull)) edgeFieldKey = edgeFieldKey + NON_NULL_SUFFIX;
+        edgeFieldKey = edgeFieldKey + IS_LIST_SUFFIX;
+        if ("true".equals(listItemNonNull)) edgeFieldKey = edgeFieldKey + LIST_ITEM_NON_NULL_SUFFIX;
+
+        GraphQLFieldDefinition edgesField = graphQLFieldMap.get(edgeFieldKey);
+        if (edgesField != null) return edgesField;
+
+        GraphQLFieldDefinition.Builder edgesFieldBuilder = GraphQLFieldDefinition.newFieldDefinition().name(edgesFieldName)
+                .type(getEdgesObjectType(rawType, nonNull, listItemNonNull));
+
+        for (Map.Entry<String, GraphQLArgument> entry : graphQLDirectiveArgumentMap.entrySet()) edgesFieldBuilder.argument(entry.getValue());
+
+        edgesField = edgesFieldBuilder.build();
+        graphQLFieldMap.put(edgeFieldKey, edgesField);
+
+        return edgesField;
+    }
+    
+    private static GraphQLOutputType getEdgesObjectType(GraphQLOutputType rawType, String nonNull, String listItemNonNull) {
+        String edgeRawTypeName = rawType.getName() + "Edge";
+        String edgesTypeKey = edgeRawTypeName;
+        if ("true".equals(nonNull)) edgesTypeKey = edgesTypeKey + NON_NULL_SUFFIX;
+        edgesTypeKey = edgesTypeKey + IS_LIST_SUFFIX;
+        if ("true".equals(listItemNonNull)) edgesTypeKey = edgesTypeKey + LIST_ITEM_NON_NULL_SUFFIX;
+
+        GraphQLOutputType edgesType = graphQLOutputTypeMap.get(edgesTypeKey);
+        if (edgesType != null) return edgesType;
+
+        GraphQLObjectType edgeRawType = graphQLObjectTypeMap.get(edgeRawTypeName);
+        if (edgeRawType == null) {
+            GraphQLFieldDefinition nodeField = getGraphQLFieldWithNoArgs("node", rawType, nonNull, "false", listItemNonNull, null);
+
+            edgeRawType = GraphQLObjectType.newObject().name(edgeRawTypeName)
+                    .field(cursorField)
+                    .field(nodeField).build();
+            graphQLObjectTypeMap.put(edgeRawTypeName, edgeRawType);
+            graphQLOutputTypeMap.put(edgeRawTypeName, edgeRawType);
+        }
+
+        edgesType = edgeRawType;;
+
+        if ("true".equals(listItemNonNull)) edgesType = new GraphQLNonNull(edgesType);
+        edgesType = new GraphQLList(edgesType);
+        if ("true".equals(nonNull)) edgesType = new GraphQLNonNull(edgesType);
+
+        if (!edgesTypeKey.equals(edgeRawTypeName)) {
+            graphQLOutputTypeMap.put(edgesTypeKey, edgesType);
+        }
+
+        return edgesType;
+    }
+
+    
+	
 
 	// Create InputObjectType (Input) for mutation fields
 	private void addSchemaInputObjectTypes() {
@@ -1577,15 +1792,13 @@ public class GraphQLSchemaDefinition {
 						String verb = GraphQLSchemaUtil.getVerbFromName(serviceName, dispatcher);
 						String entityName = GraphQLSchemaUtil.getDefaultEntityName(serviceName, dispatcher);
 						ModelEntity entity = GraphQLSchemaUtil.getEntityDefinition(entityName, delegator);
-						List<String> allFields = verb.equals("delete") ? entity.getPkFieldNames()
-								: entity.getAllFieldNames();
+						List<String> allFields = verb.equals("delete") ? entity.getPkFieldNames() : entity.getAllFieldNames();
 						inputFieldMap = new LinkedHashMap<>(allFields.size());
 						for (int i = 0; i < allFields.size(); i++) {
 							ModelField fi = entity.getField(allFields.get(i));
 							String inputFieldType = GraphQLSchemaUtil.fieldTypeGraphQLMap.get(fi.getType());
 							Object defaultValue = null;
-							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(fi.getName(),
-									inputFieldType, defaultValue, "");
+							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(fi.getName(), inputFieldType, defaultValue, "");
 							inputFieldMap.put(fi.getName(), inputFieldDef);
 						}
 
@@ -1600,20 +1813,14 @@ public class GraphQLSchemaDefinition {
 							}
 							Object defaultValue = null;
 							boolean inputFieldNonNull = !parmNode.isOptional();
-							boolean inputFieldIsList = GraphQLSchemaUtil.getShortJavaType(parmNode.type).equals("List")
-									? true
-									: false;
-
+							boolean inputFieldIsList = GraphQLSchemaUtil.getShortJavaType(parmNode.type).equals("List") ? true : false;
 							GraphQLInputType fieldInputType = getInputTypeRecursiveInSD(parmNode, inputTypeName);
-							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(parmName,
-									fieldInputType.getName(), defaultValue, "", inputFieldNonNull, inputFieldIsList,
-									false);
+							InputObjectFieldDefinition inputFieldDef = new InputObjectFieldDefinition(parmName, fieldInputType.getName(), defaultValue, "", inputFieldNonNull, inputFieldIsList, false);
 							inputFieldMap.put(parmName, inputFieldDef);
 						}
 					}
 
-					GraphQLInputObjectType.Builder inputObjectTypeBuilder = GraphQLInputObjectType.newInputObject()
-							.name(inputTypeName).description("Autogenerated input type of " + inputTypeName);
+					GraphQLInputObjectType.Builder inputObjectTypeBuilder = GraphQLInputObjectType.newInputObject().name(inputTypeName).description("Autogenerated input type of " + inputTypeName);
 
 					for (Map.Entry<String, InputObjectFieldDefinition> inputFieldEntry : inputFieldMap.entrySet()) {
 						InputObjectFieldDefinition inputFieldDef = inputFieldEntry.getValue();
@@ -1675,11 +1882,11 @@ public class GraphQLSchemaDefinition {
 		case "Map":
 
 			break;
-		case "com.moqui.graphql.PaginationInputType":
+		case "org.apache.ofbiz.graphql.PaginationInputType":
 			return paginationInputType;
-		case "com.moqui.graphql.OperationInputType":
+		case "org.apache.ofbiz.graphql.OperationInputType":
 			return operationInputType;
-		case "com.moqui.graphql.DateRangeInputType":
+		case "org.apache.ofbiz.graphql.DateRangeInputType":
 			return dateRangeInputType;
 		case "graphql.schema.DataFetchingEnvironment":
 			return null;
