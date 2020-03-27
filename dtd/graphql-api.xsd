@@ -18,16 +18,18 @@ specific language governing permissions and limitations
 under the License.
 -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+ <xs:element name="graphql-type" abstract="true"/>
     <xs:element name="graphql-api">
         <xs:complexType>
             <xs:sequence>
                 <xs:choice minOccurs="0" maxOccurs="unbounded">
                     <xs:choice minOccurs="0" maxOccurs="unbounded">
                         <xs:element ref="graphql-type"/>
+                        <xs:element ref="extend-object"/>
                     </xs:choice>
+                    <xs:element ref="interface-fetcher"/>
+                    <xs:element ref="input-type"/>
                 </xs:choice>
-                <xs:element ref="interface-fetcher"/>
-                <xs:element ref="input-type"/>
             </xs:sequence>
             <xs:attribute name="name" type="xs:string" use="required"/>
             <xs:attribute name="query" type="xs:string">
@@ -63,9 +65,7 @@ under the License.
             </xs:attribute>
         </xs:complexType>
     </xs:element>
-
-    <xs:element name="graphql-type" abstract="true"/>
-
+    
     <xs:element name="scalar-type" substitutionGroup="graphql-type">
         <xs:complexType>
             <xs:attribute name="name" type="graphql-scalar-type"/>
@@ -83,6 +83,53 @@ under the License.
                 <xs:element minOccurs="0" maxOccurs="unbounded" name="interface">
                     <xs:complexType>
                         <xs:attribute name="name" type="xs:string" use="required"/>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element minOccurs="0" maxOccurs="unbounded" ref="field"/>
+            </xs:sequence>
+            <xs:attribute name="name" type="xs:string" use="required"/>
+        </xs:complexType>
+    </xs:element>
+    <xs:element name="resolver-map">
+        <xs:annotation><xs:documentation>
+            Map value of extend-object@resolver-field to an GraphQLObjectType.
+        </xs:documentation></xs:annotation>
+        <xs:complexType>
+            <xs:attribute name="resolver-value" type="xs:string" use="required"/>
+            <xs:attribute name="resolver-type" type="xs:string" use="required"/>
+        </xs:complexType>
+    </xs:element>
+    <xs:element name="convert-to-interface">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element minOccurs="0" maxOccurs="unbounded" ref="resolver-map"/>
+            </xs:sequence>
+            <xs:attribute name="resolver-field" type="xs:string" use="required">
+                <xs:annotation>
+                    <xs:documentation>This field value determines actual type. The typical case in moqui
+                        is Person, Organization is a concrete of Party, the Party@partyTypeEnumId tells the Party is
+                        Person or Organization. So in this case, resolver-field is partyTypeEnumId, then there should be
+                        resolver-map element to map the value of partyTypeEnumId to GraphQLObjectType
+                    </xs:documentation>
+                </xs:annotation>
+            </xs:attribute>
+        </xs:complexType>
+    </xs:element>
+    <xs:element name="extend-object">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:choice minOccurs="1" maxOccurs="1">
+                    <xs:element minOccurs="0" maxOccurs="unbounded" name="interface">
+                        <xs:complexType>
+                            <xs:attribute name="name" type="xs:string" use="required"/>
+                            <xs:attribute name="resolver-value" type="xs:string" use="required"/>
+                        </xs:complexType>
+                    </xs:element>
+                    <xs:element minOccurs="0" maxOccurs="1" ref="convert-to-interface"/>
+                </xs:choice>
+                <xs:element minOccurs="0" maxOccurs="unbounded" name="exclude-field">
+                    <xs:complexType>
+                        <xs:attribute name="name" type="xs:string"/>
                     </xs:complexType>
                 </xs:element>
                 <xs:element minOccurs="0" maxOccurs="unbounded" ref="field"/>
@@ -204,6 +251,7 @@ under the License.
                     <xs:element ref="empty-fetcher"/>
                     <xs:element ref="entity-fetcher"/>
                     <xs:element ref="service-fetcher"/>
+                    <xs:element ref="interface-fetcher"/>
                 </xs:choice>
             </xs:sequence>
             <xs:attribute name="name" type="xs:string" use="required"/>
