@@ -24,6 +24,7 @@ import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
 
+import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.entity.GenericEntityException;
@@ -44,34 +45,25 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 
 	private String serviceName;
 	private String requireAuthentication;
-
+	private String invoke;
+	private String defaultEntity;
+	boolean isEntityAutoService;
+    boolean resultPrimitive = false;
+	
+	public Map<String, String> getRelKeyMap() {
+		return relKeyMap;
+	}
+	
 	public String getServiceName() {
 		return serviceName;
-	}
-
-	public void setServiceName(String serviceName) {
-		this.serviceName = serviceName;
-	}
-
-	public String getRequireAuthentication() {
-		return requireAuthentication;
 	}
 
 	public boolean isEntityAutoService() {
 		return isEntityAutoService;
 	}
 
-	public boolean isResultPrimitive() {
-		return resultPrimitive;
-	}
-
-	public Map<String, String> getRelKeyMap() {
-		return relKeyMap;
-	}
-
-	boolean isEntityAutoService;
-	boolean resultPrimitive = false;
-	String defaultEntity;
+	
+	
 	Map<String, String> relKeyMap = new HashMap<>();
 
 	public ServiceDataFetcher(Element node, FieldDefinition fieldDef, Delegator delegator, LocalDispatcher dispatcher) {
@@ -97,6 +89,7 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 			}
 
 			defaultEntity = service.defaultEntityName;
+			invoke = service.invoke;
 
 			if (this.isEntityAutoService) {
 				if (!fieldDef.isMutation())
@@ -114,32 +107,19 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 
 	@Override
 	Object fetch(DataFetchingEnvironment environment) {
-		System.out.println("Here, came - ");
-		System.out.println("environment " + environment);
-		System.out.println("Arguments " + environment.getArguments());
-
-		String productId = environment.getArgument("id");
 		DefaultGraphQLServletContext context = environment.getContext();
 		HttpServletRequest request = context.getHttpServletRequest();
-		Delegator delegator = (Delegator) request.getAttribute("delegator");
 		LocalDispatcher dispatcher = (LocalDispatcher) request.getAttribute("dispatcher");
-		System.out.println(" this.serviceName needs to be called - " + this.serviceName);
-
 		GenericValue userLogin = (GenericValue) request.getAttribute("userLogin");
-
-		if (delegator == null) {
-			delegator = (Delegator) request.getServletContext().getAttribute("delegator");
-		}
 		if (dispatcher == null) {
 			dispatcher = (LocalDispatcher) request.getServletContext().getAttribute("dispatcher");
 		}
 
 		ModelService service = null;
-		;
+		
 		try {
 			service = dispatcher.getDispatchContext().getModelService(serviceName);
 		} catch (GenericServiceException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		Map<String, Object> inputFieldsMap = new HashMap<>();
@@ -158,14 +138,14 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 			if (fieldDef.isMutation()) {
 				result = dispatcher.runSync(serviceName, inputFieldsMap);
 				String verb = GraphQLSchemaUtil.getVerbFromName(serviceName, dispatcher);
-				if (this.isEntityAutoService) {
-					if (verb.equals("delete")) { // delete return result object { error, message }
-
+				if (this.isEntityAutoService || isCRUDService()) {
+					if (UtilValidate.isNotEmpty(verb) && verb.equals("delete")) {
+						result.put("error", false);
+						result.put("message", "Deleted Successfully");
 					} else {
-						String entityName = GraphQLSchemaUtil.getDefaultEntityName(verb, dispatcher);
 						 GenericValue entity = null;
 							try {
-								entity = EntityQuery.use(delegator).from(entityName).where(result).cache().queryOne();
+								entity = EntityQuery.use(delegator).from(defaultEntity).where(result).cache().queryOne();
 								result.put("_graphql_result_", entity);
 							} catch (GenericEntityException e) {
 								// TODO Auto-generated catch block
@@ -186,5 +166,12 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 		} else {
 			return ServiceUtil.getErrorMessage(result);
 		}
+	}
+	
+	private boolean isCRUDService() {
+		if((invoke.startsWith("create") || invoke.startsWith("update") || invoke.startsWith("delete")) && invoke.endsWith(defaultEntity)) {
+			return true;
+		}
+		return false;
 	}
 }
