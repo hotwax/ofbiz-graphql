@@ -50,6 +50,7 @@ import org.apache.ofbiz.entity.model.ModelEntity;
 import org.apache.ofbiz.entity.model.ModelField;
 import org.apache.ofbiz.entity.model.ModelReader;
 import org.apache.ofbiz.graphql.fetcher.EntityDataFetcher;
+import org.apache.ofbiz.graphql.fetcher.ServiceDataFetcher;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.ArgumentDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.GraphQLTypeDefinition;
@@ -63,6 +64,7 @@ import org.w3c.dom.Element;
 import graphql.language.Field;
 import graphql.schema.DataFetchingEnvironment;
 import graphql.schema.GraphQLScalarType;
+import graphql.schema.GraphQLType;
 
 public class GraphQLSchemaUtil {
 
@@ -374,6 +376,8 @@ public class GraphQLSchemaUtil {
 				case "entity-fetcher":
 					fieldDef.setDataFetcher(new EntityDataFetcher(delegator, childNode, fieldDef));
 					break;
+				case "service-fetcher":
+                    fieldDef.setDataFetcher(new ServiceDataFetcher(childNode, fieldDef, delegator, dispatcher));	
 				}
 			}
 		} else {
@@ -447,6 +451,11 @@ public class GraphQLSchemaUtil {
 	static String getGraphQLTypeNameByJava(String javaType) {
         if (javaType == null) return "String";
         return javaTypeGraphQLMap.get(getShortJavaType(javaType));
+    }
+	
+	static String getGraphQLTypeNameBySQLType(String sqlType) {
+        if (sqlType == null) return null;
+        return fieldTypeGraphQLMap.get(sqlType);
     }
 
 }

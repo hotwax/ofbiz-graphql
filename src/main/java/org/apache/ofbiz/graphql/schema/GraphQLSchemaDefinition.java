@@ -1808,7 +1808,8 @@ public class GraphQLSchemaDefinition {
 						for (String parmName : sd.getInParamNames()) {
 							ModelParam parmNode = sd.getParam(parmName);
 							boolean isInternal = parmNode.internal;
-							if (isInternal) {
+							String entityName = parmNode.entityName;
+							if (isInternal || ((parmNode.type.equals("List") || parmNode.type.equals("Map") || parmNode.type.equals("Set")) && UtilValidate.isEmpty(entityName))) {
 								continue;
 							}
 							Object defaultValue = null;
@@ -1824,7 +1825,6 @@ public class GraphQLSchemaDefinition {
 
 					for (Map.Entry<String, InputObjectFieldDefinition> inputFieldEntry : inputFieldMap.entrySet()) {
 						InputObjectFieldDefinition inputFieldDef = inputFieldEntry.getValue();
-
 						if ("clientMutationId".equals(inputFieldDef.name))
 							continue;
 
@@ -1857,6 +1857,21 @@ public class GraphQLSchemaDefinition {
 
 	}
 
+	private GraphQLInputType getInputTypeRecursiveInSD(ModelField field, String inputTypeNamePrefix) {
+
+		if (field == null)
+			return GraphQLString;
+		
+		String parmType = field.getType();
+		String inputTypeName = GraphQLSchemaUtil.getGraphQLTypeNameBySQLType(parmType);
+		GraphQLScalarType scalarType = GraphQLSchemaUtil.graphQLScalarTypes.get(inputTypeName);
+		if (scalarType != null) {
+			graphQLInputTypeMap.put(inputTypeName, scalarType);
+			return scalarType;
+		}
+		return null;
+	}
+	
 	private GraphQLInputType getInputTypeRecursiveInSD(ModelParam node, String inputTypeNamePrefix) {
 		// default to String
 		if (node == null)
@@ -1864,23 +1879,49 @@ public class GraphQLSchemaDefinition {
 
 		String parmName = node.getName();
 		String parmType = node.getType();
+		String entityName = node.getEntityName();
 		String inputTypeName = GraphQLSchemaUtil.getGraphQLTypeNameByJava(parmType);
-
 		GraphQLScalarType scalarType = GraphQLSchemaUtil.graphQLScalarTypes.get(inputTypeName);
 		if (scalarType != null)
 			return scalarType;
 
 		inputTypeName = inputTypeNamePrefix + '_' + parmName;
-
 		GraphQLInputType inputType = graphQLInputTypeMap.get(inputTypeName);
 		if (inputType != null)
 			return inputType;
 
 		switch (parmType) {
 		case "List":
-			break;
-		case "Map":
+			if (entityName != null) {
+				GraphQLInputObjectType.Builder builder = GraphQLInputObjectType.newInputObject().name(inputTypeName);
+				ModelEntity entity = GraphQLSchemaUtil.getEntityDefinition(entityName, delegator);
+				if (entity != null) {
+					for (String fieldName : entity.getAllFieldNames()) {
+						ModelField field = entity.getField(fieldName);						
+						GraphQLInputType mapEntryRawType = getInputTypeRecursiveInSD(field, inputTypeName);
+						GraphQLInputObjectField inputObjectField = GraphQLInputObjectField.newInputObjectField().name(fieldName).type(getGraphQLInputType(mapEntryRawType, field.getIsNotNull(), false, false)).build();
+						builder.field(inputObjectField);
+					}
+					inputType = builder.build();
+				}
 
+			}
+             break;
+		case "Map":
+			if (entityName != null) {
+				GraphQLInputObjectType.Builder builder = GraphQLInputObjectType.newInputObject().name(inputTypeName);
+				ModelEntity entity = GraphQLSchemaUtil.getEntityDefinition(entityName, delegator);
+				if (entity != null) {
+					for (String fieldName : entity.getAllFieldNames()) {
+						ModelField field = entity.getField(fieldName);						
+						GraphQLInputType mapEntryRawType = getInputTypeRecursiveInSD(field, inputTypeName);
+						GraphQLInputObjectField inputObjectField = GraphQLInputObjectField.newInputObjectField().name(fieldName).type(getGraphQLInputType(mapEntryRawType, field.getIsNotNull(), false, false)).build();
+						builder.field(inputObjectField);
+					}
+					inputType = builder.build();
+				}
+
+			}
 			break;
 		case "org.apache.ofbiz.graphql.PaginationInputType":
 			return paginationInputType;
@@ -1898,6 +1939,44 @@ public class GraphQLSchemaDefinition {
 		graphQLInputTypeMap.put(inputTypeName, inputType);
 		return inputType;
 	}
+	
+	private static GraphQLInputType getGraphQLInputType(InputObjectFieldDefinition inputFieldDef) {
+        return getGraphQLInputType(inputFieldDef.type, inputFieldDef.nonNull, inputFieldDef.isList(), inputFieldDef.listItemNonNull);
+    }
+
+    private static GraphQLInputType getGraphQLInputType(String rawTypeName, boolean nonNull, boolean isList, boolean listItemNonNull) {
+        GraphQLInputType rawType = graphQLInputTypeMap.get(rawTypeName);
+        if (rawType == null) {
+            rawType = graphQLTypeReferenceMap.get(rawTypeName);
+            if (rawType == null) {
+                rawType = new GraphQLTypeReference(rawTypeName);
+                graphQLTypeReferenceMap.put(rawTypeName, (GraphQLTypeReference) rawType);
+            }
+        }
+        return getGraphQLInputType(rawType, nonNull, isList, listItemNonNull);
+    }
+    private static GraphQLInputType getGraphQLInputType(GraphQLInputType rawType, boolean nonNull, boolean isList, boolean listItemNonNull) {
+        String inputTypeKey = rawType.getName();
+        if (nonNull) inputTypeKey = inputTypeKey + NON_NULL_SUFFIX;
+        if (isList) {
+            inputTypeKey = inputTypeKey + IS_LIST_SUFFIX;
+            if (listItemNonNull) inputTypeKey = inputTypeKey + LIST_ITEM_NON_NULL_SUFFIX;
+        }
+
+        GraphQLInputType wrappedType = graphQLInputTypeMap.get(inputTypeKey);
+        if (wrappedType != null) return wrappedType;
+
+        wrappedType = rawType;
+        if (isList) {
+            if (listItemNonNull) wrappedType = new GraphQLNonNull(wrappedType);
+            wrappedType = new GraphQLList(wrappedType);
+        }
+        if (nonNull) wrappedType = new GraphQLNonNull(wrappedType);
+
+        if (!inputTypeKey.equals(rawType.getName())) graphQLInputTypeMap.put(inputTypeKey, wrappedType);
+
+        return wrappedType;
+    }
 
 	private static GraphQLInputObjectField buildSchemaInputField(InputObjectFieldDefinition inputFieldDef) {
 		String inputFieldKey = getInputFieldKey(inputFieldDef);
