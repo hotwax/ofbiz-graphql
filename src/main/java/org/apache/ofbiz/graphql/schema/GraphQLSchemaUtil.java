@@ -46,6 +46,7 @@ import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.entity.GenericEntityException;
+import org.apache.ofbiz.entity.GenericValue;
 import org.apache.ofbiz.entity.model.ModelEntity;
 import org.apache.ofbiz.entity.model.ModelField;
 import org.apache.ofbiz.entity.model.ModelReader;
@@ -64,7 +65,6 @@ import org.w3c.dom.Element;
 import graphql.language.Field;
 import graphql.schema.DataFetchingEnvironment;
 import graphql.schema.GraphQLScalarType;
-import graphql.schema.GraphQLType;
 
 public class GraphQLSchemaUtil {
 
@@ -473,14 +473,32 @@ public class GraphQLSchemaUtil {
 		return shortJavaType;
 	}
 	
-	static String getGraphQLTypeNameByJava(String javaType) {
+	public static String getGraphQLTypeNameByJava(String javaType) {
         if (javaType == null) return "String";
         return javaTypeGraphQLMap.get(getShortJavaType(javaType));
     }
 	
-	static String getGraphQLTypeNameBySQLType(String sqlType) {
+	public static String getGraphQLTypeNameBySQLType(String sqlType) {
         if (sqlType == null) return null;
         return fieldTypeGraphQLMap.get(sqlType);
+    }
+	
+
+	public static String encodeRelayCursor(Map<String, Object> ev, List<String> pkFieldNames) {
+        return encodeRelayId(ev, pkFieldNames);
+    }
+
+    static String encodeRelayId(Map<String, Object> ev, List<String> pkFieldNames) {
+        if (pkFieldNames.size() == 0) throw new IllegalArgumentException("Entity value must have primary keys to generate id");
+        Object pkFieldValue0 = ev.get(pkFieldNames.get(0));
+        if (pkFieldValue0 instanceof Timestamp) pkFieldValue0 = ((Timestamp) pkFieldValue0).getTime();
+        String id = (String) pkFieldValue0;
+        for (int i = 1; i < pkFieldNames.size(); i++) {
+            Object pkFieldValue = ev.get(pkFieldNames.get(i));
+            if (pkFieldValue instanceof Timestamp) pkFieldValue = ((Timestamp) pkFieldValue).getTime();
+            id = id + '|' + ((String) pkFieldValue);
+        }
+        return id;
     }
 
 }

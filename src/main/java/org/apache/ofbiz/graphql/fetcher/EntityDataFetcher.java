@@ -114,6 +114,8 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 				int pageSize = (int) paginationMap.get("pageSize");
 				int pageRangeLow = pageIndex * pageSize + 1;
 				int pageRangeHigh = (pageIndex * pageSize) + pageSize;
+				int first = (int) paginationMap.get("first");
+				String after = (String) paginationMap.get("after");
 				boolean hasPreviousPage = pageIndex > 0;
 				String orderBy = (String) paginationMap.get("orderByField");
 				options.setLimit(pageSize);
@@ -141,12 +143,14 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 				pageInfo.put("hasNextPage", hasNextPage);
 				pageInfo.put("totalCount", count);
 				edgesDataList = new ArrayList<Map<String, Object>>(result != null ? result.size() : 0);
+				String cursor = null;
 				if (interfaceEntityName == null || interfaceEntityName.isEmpty() || entityName.equals(interfaceEntityName)) {
-					pageInfo.put("startCursor", "1"); //TODO
-					pageInfo.put("endCursor", "2"); //TODO
+					pageInfo.put("startCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(0), pkFieldNames)); //TODO
+					pageInfo.put("endCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(result.size() - 1), pkFieldNames)); //TODO
 					for (GenericValue gv : result) {
 						edgesData = new HashMap<>(2);
-						edgesData.put("cursor", "1"); //TODO
+						cursor = GraphQLSchemaUtil.encodeRelayCursor(gv, pkFieldNames);
+						edgesData.put("cursor", cursor); //TODO
 						edgesData.put("node", gv);
 						edgesDataList.add(edgesData);
 					}
