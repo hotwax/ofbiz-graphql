@@ -123,9 +123,10 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 			e.printStackTrace();
 		}
 		Map<String, Object> inputFieldsMap = new HashMap<>();
+		Map<String, Object> operationMap = new HashMap<>();
 		inputFieldsMap.put("userLogin", userLogin);
 		if (fieldDef.isMutation()) {
-			GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap);
+			GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap, operationMap);
 		} else {
 			GraphQLSchemaUtil.transformQueryServiceArguments(service, environment.getArguments(), inputFieldsMap);
 			Map source = environment.getSource();

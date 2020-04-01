@@ -275,9 +275,10 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 	@Override
 	Object fetch(DataFetchingEnvironment environment) {
 		Map<String, Object> inputFieldsMap = new HashMap<>();
+		Map<String, Object> operationMap = new HashMap<>();
 		Map<String, Object> resultMap = new HashMap<>();
 		Map source = environment.getSource();
-		GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap);
+		GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap, operationMap);
 		if (operation.equals("one")) {
 			resultMap = defaultFetcher.searchFormMap(source, inputFieldsMap, environment);
 			mergeWithConcreteValue(resultMap);

@@ -32,6 +32,7 @@ import org.apache.ofbiz.entity.condition.EntityCondition;
 import org.apache.ofbiz.entity.condition.EntityOperator;
 import org.apache.ofbiz.entity.util.EntityFindOptions;
 import org.apache.ofbiz.entity.util.EntityQuery;
+import org.apache.ofbiz.graphql.fetcher.utils.DataFetcherUtils;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaUtil;
 import org.w3c.dom.Element;
@@ -59,8 +60,9 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 
 	Object fetch(DataFetchingEnvironment environment) {
 		Map<String, Object> inputFieldsMap = new HashMap<>();
+		Map<String, Object> operationMap = new HashMap<>();
 		Map<String, Object> resultMap = new HashMap<>();
-		GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap);
+		GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap, operationMap);
 		if (operation.equals("one")) {
 			try {
 				GenericValue entity = null;
@@ -94,7 +96,11 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 			List<GenericValue> result = null;
 			Map<String, Object> edgesData;
 			List<EntityCondition> entityConditions = new ArrayList<EntityCondition>();
-			entityConditions.add(EntityCondition.makeCondition(inputFieldsMap));
+			if(inputFieldsMap.size() != 0) {
+				entityConditions.add(EntityCondition.makeCondition(inputFieldsMap));	
+			} else {
+				DataFetcherUtils.addEntityConditions(entityConditions, operationMap, GraphQLSchemaUtil.getEntityDefinition(entityName, delegator));
+			}
 			for (Map.Entry<String, String> entry : relKeyMap.entrySet()) {
 				entityConditions.add(EntityCondition.makeCondition(entry.getValue(), EntityOperator.EQUALS, ((Map<?, ?>) environment.getSource()).get(entry.getKey())));
 			}

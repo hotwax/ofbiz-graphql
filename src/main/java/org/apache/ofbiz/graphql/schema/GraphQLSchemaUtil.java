@@ -231,7 +231,7 @@ public class GraphQLSchemaUtil {
 		return entities;
 	}
 
-	public static void transformArguments(Map<String, Object> arguments, Map<String, Object> inputFieldsMap) {
+	public static void transformArguments(Map<String, Object> arguments, Map<String, Object> inputFieldsMap, Map<String, Object> operationMap) {
 		for (Map.Entry<String, Object> entry : arguments.entrySet()) {
 			String argName = entry.getKey();
 			// Ignore if argument which is used for directive @include and @skip
@@ -249,6 +249,31 @@ public class GraphQLSchemaUtil {
 					});
 					continue;
 				}
+				
+				if (argValueMap.get("value") != null)
+					operationMap.put(argName, argValueMap.get("value"));
+				if (argValueMap.get("op") != null)
+					operationMap.put(argName + "_op", argValueMap.get("op"));
+				if (argValueMap.get("not") != null)
+					operationMap.put(argName + "_not", argValueMap.get("not"));
+				if (argValueMap.get("ic") != null)
+					operationMap.put(argName + "_ic", argValueMap.get("ic"));
+				operationMap.put("pageIndex", argValueMap.get("pageIndex") != null ? argValueMap.get("pageIndex") : 0);
+				operationMap.put("pageSize", argValueMap.get("pageSize") != null ? argValueMap.get("pageSize") : 20);
+				if (argValueMap.get("pageNoLimit") != null)
+					operationMap.put("pageNoLimit", argValueMap.get("pageNoLimit"));
+				if (argValueMap.get("orderByField") != null)
+					operationMap.put("orderByField", argValueMap.get("orderByField"));
+
+				if (argValueMap.get("period") != null)
+					operationMap.put(argName + "_period", argValueMap.get("period"));
+				if (argValueMap.get("poffset") != null)
+					operationMap.put(argName + "_poffset", argValueMap.get("poffset"));
+				if (argValueMap.get("from") != null)
+					operationMap.put(argName + "_from", argValueMap.get("from"));
+				if (argValueMap.get("thru") != null)
+					operationMap.put(argName + "_thru", argValueMap.get("thru"));
+
 			} else {
 				// periodValid_ type argument is handled specially
 				if (!(argName == "periodValid_" || argName.endsWith("PeriodValid_"))) {
