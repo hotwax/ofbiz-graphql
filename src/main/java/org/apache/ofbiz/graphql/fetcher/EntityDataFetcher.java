@@ -20,6 +20,7 @@ package org.apache.ofbiz.graphql.fetcher;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,7 +128,7 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 				int count = 0;
 				try {
 					count = (int)delegator.findCountByCondition(entityName, EntityCondition.makeCondition(entityConditions), null, options);
-					result = delegator.findList(entityName, EntityCondition.makeCondition(entityConditions), null, null, options, false);
+					result = delegator.findList(entityName, EntityCondition.makeCondition(entityConditions), null, UtilValidate.isNotEmpty(orderBy) ? Arrays.asList(orderBy.split(",")) : null, options, false);
 				} catch (GenericEntityException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
