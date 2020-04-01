@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
 import org.apache.ofbiz.entity.GenericEntityException;
@@ -46,7 +48,7 @@ class BaseEntityDataFetcher extends BaseDataFetcher {
 		try {
 			entity = delegator.getModelReader().getModelEntity(entityName);
 		} catch (GenericEntityException e) {
-			e.printStackTrace();
+			throw new IllegalArgumentException("Entity [" + entityName + "] does not exist.");
 		}
 
 		if (element.getAttribute("cache") != null) {
@@ -70,6 +72,7 @@ class BaseEntityDataFetcher extends BaseDataFetcher {
 			}
 			if (relFn == null)
 				throw new IllegalArgumentException("The key-map.@related of Entity " + entityName + " should be specified");
+			
 			keyMap.put(fieldName, relFn);
 		}
 
@@ -109,7 +112,7 @@ class BaseEntityDataFetcher extends BaseDataFetcher {
 			this.operation = "list";
 		else
 			this.operation = "one";
-		if (interfaceEntityName != null) {
+		if (UtilValidate.isNotEmpty(interfaceEntityName)) {
 			ModelEntity entity = null;
 			try {
 				entity = delegator.getModelReader().getModelEntity(entityName);

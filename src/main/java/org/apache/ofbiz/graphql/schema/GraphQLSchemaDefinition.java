@@ -633,6 +633,8 @@ public class GraphQLSchemaDefinition {
 			this.description = description;
 			this.type = "object";
 			this.fieldDefMap.putAll(fieldDefMap);
+			this.delegator = delegator;
+			this.dispatcher = dispatcher;
 		}
 
 		List<FieldDefinition> getFieldList() {
