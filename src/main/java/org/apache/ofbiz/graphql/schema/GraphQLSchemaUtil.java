@@ -496,7 +496,7 @@ public class GraphQLSchemaUtil {
         for (int i = 1; i < pkFieldNames.size(); i++) {
             Object pkFieldValue = ev.get(pkFieldNames.get(i));
             if (pkFieldValue instanceof Timestamp) pkFieldValue = ((Timestamp) pkFieldValue).getTime();
-            id = id + '|' + ((String) pkFieldValue);
+            id = id + '|' + pkFieldValue;
         }
         return id;
     }
