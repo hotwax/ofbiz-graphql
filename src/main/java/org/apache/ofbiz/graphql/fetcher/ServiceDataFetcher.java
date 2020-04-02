@@ -18,6 +18,7 @@
  *******************************************************************************/
 package org.apache.ofbiz.graphql.fetcher;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -156,6 +157,22 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 				}
 			} else {
 				result = dispatcher.runSync(serviceName, inputFieldsMap);
+				if (ServiceUtil.isSuccess(result)) {
+					if (result.get("_graphql_result_") instanceof List) {
+						Map<String, Object> edgesData;
+						List<Map<String, Object>> resultList = (List<Map<String, Object>>) result.get("_graphql_result_");
+						List<Map<String, Object>> edgesDataList = new ArrayList<Map<String, Object>>(resultList != null ? resultList.size() : 0);
+						for (Map gv : resultList) {
+							edgesData = new HashMap<>(2);
+							edgesData.put("node", gv);
+							edgesDataList.add(edgesData);
+						}
+						result.clear();
+						result.put("edges", edgesDataList);
+						return result;
+					}
+
+				}
 
 			}
 		} catch (GenericServiceException e) {
