@@ -18,14 +18,15 @@
  *******************************************************************************/
 package org.apache.ofbiz.graphql.fetcher;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-
 import org.apache.ofbiz.base.util.UtilValidate;
 import org.apache.ofbiz.base.util.UtilXml;
 import org.apache.ofbiz.entity.Delegator;
@@ -34,7 +35,9 @@ import org.apache.ofbiz.entity.GenericValue;
 import org.apache.ofbiz.entity.condition.EntityCondition;
 import org.apache.ofbiz.entity.condition.EntityOperator;
 import org.apache.ofbiz.entity.model.ModelEntity;
+import org.apache.ofbiz.entity.util.EntityFindOptions;
 import org.apache.ofbiz.entity.util.EntityQuery;
+import org.apache.ofbiz.graphql.fetcher.utils.DataFetcherUtils;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaDefinition.FieldDefinition;
 import org.apache.ofbiz.graphql.schema.GraphQLSchemaUtil;
 import org.apache.ofbiz.service.LocalDispatcher;
@@ -129,14 +132,14 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 			this.relKeyMap.putAll(relKeyMap);
 		}
 
-		abstract List<Map<String, Object>> searchFormMap(List sourceItems, Map<String, Object> inputFieldsMap,
+		abstract List<Map<String, Object>> searchFormMapList(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap,
 				DataFetchingEnvironment environment);
 
 		abstract Map<String, Object> searchFormMap(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap,
 				DataFetchingEnvironment environment);
 
-		abstract Map<String, Object> searchFormMapWithPagination(List<Object> sourceItems,
-				Map<String, Object> inputFieldsMap, DataFetchingEnvironment environment);
+		abstract Map<String, Object> searchFormMapWithPagination(Map<String, Object> sourceItem,
+				Map<String, Object> inputFieldsMap, Map<String, Object> operationMap, DataFetchingEnvironment environment);
 	}
 
 	static class InternalEntityDataFetcher extends InternalDataFetcher {
@@ -154,9 +157,33 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 		}
 
 		@Override
-		List<Map<String, Object>> searchFormMap(List sourceItems, Map<String, Object> inputFieldsMap,
+		List<Map<String, Object>> searchFormMapList(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap,
 				DataFetchingEnvironment environment) {
-			return null;
+			List<GenericValue> result = null;
+			List<Map<String, Object>> resultWrapper = new ArrayList<>();
+			List<EntityCondition> entityConditions = new ArrayList<EntityCondition>();
+			if(inputFieldsMap.size() != 0) {
+				entityConditions.add(EntityCondition.makeCondition(inputFieldsMap));	
+			} else {
+				DataFetcherUtils.addEntityConditions(entityConditions, inputFieldsMap, GraphQLSchemaUtil.getEntityDefinition(entityName, delegator));
+			}
+			
+			if (environment != null) {
+				for (Map.Entry<String, String> entry : relKeyMap.entrySet()) {
+					entityConditions.add(EntityCondition.makeCondition(entry.getValue(), EntityOperator.EQUALS, ((Map<?, ?>) environment.getSource()).get(entry.getKey())));
+				}	
+			}
+			
+			try {
+				result = delegator.findList(entityName, EntityCondition.makeCondition(entityConditions), null, null, null, false);
+			} catch (GenericEntityException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			result.forEach((gv) -> {
+				resultWrapper.add(new HashMap<String, Object>(gv));
+			});	
+			return resultWrapper;
 		}
 
 		@Override
@@ -189,9 +216,47 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 		}
 
 		@Override
-		Map<String, Object> searchFormMapWithPagination(List<Object> sourceItems, Map<String, Object> inputFieldsMap,
+		Map<String, Object> searchFormMapWithPagination(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap, Map<String, Object> operationMap,
 				DataFetchingEnvironment environment) {
-			return null;
+			List<GenericValue> result = null;
+			List<Map<String, Object>> resultWrapper = new ArrayList<>();
+			Map<String, Object> arguments = environment.getArguments();
+			Map<String, Object> paginationMap = (Map<String, Object>) arguments.get("pagination");
+			EntityFindOptions options = new EntityFindOptions();
+			int pageIndex = (int) paginationMap.get("pageIndex");
+			int pageSize = (int) paginationMap.get("pageSize");
+			String orderBy = (String) paginationMap.get("orderByField");
+			options.setLimit(pageSize);
+			options.setMaxRows(pageSize);
+			options.setOffset(pageSize * pageIndex);
+			int count = 0;
+			List<EntityCondition> entityConditions = new ArrayList<EntityCondition>();
+			if(inputFieldsMap.size() != 0) {
+				entityConditions.add(EntityCondition.makeCondition(inputFieldsMap));	
+			} else {
+				DataFetcherUtils.addEntityConditions(entityConditions, operationMap, GraphQLSchemaUtil.getEntityDefinition(entityName, delegator));
+			}
+			for (Map.Entry<String, String> entry : relKeyMap.entrySet()) {
+				entityConditions.add(EntityCondition.makeCondition(entry.getValue(), EntityOperator.EQUALS, ((Map<?, ?>) environment.getSource()).get(entry.getKey())));
+			}
+			try {
+				count = (int)delegator.findCountByCondition(entityName, EntityCondition.makeCondition(entityConditions), null, options);
+				result = delegator.findList(entityName, EntityCondition.makeCondition(entityConditions), null, UtilValidate.isNotEmpty(orderBy) ? Arrays.asList(orderBy.split(",")) : null, options, false);
+			} catch (GenericEntityException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			result.forEach((gv) -> {
+				resultWrapper.add(new HashMap<String, Object>(gv));
+			});
+			
+			 Map<String, Object> resultMap = new HashMap<>();
+			 resultMap.put("pageIndex", pageIndex);
+			 resultMap.put("pageSize", pageSize);
+			 resultMap.put("count", count);
+			 resultMap.put("data", resultWrapper);
+			
+			return resultMap;
 		}
 
 	}
@@ -203,7 +268,7 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 		}
 
 		@Override
-		List<Map<String, Object>> searchFormMap(List sourceItems, Map<String, Object> inputFieldsMap,
+		List<Map<String, Object>> searchFormMapList(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap,
 				DataFetchingEnvironment environment) {
 			// TODO Auto-generated method stub
 			return null;
@@ -217,7 +282,7 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 		}
 
 		@Override
-		Map<String, Object> searchFormMapWithPagination(List<Object> sourceItems, Map<String, Object> inputFieldsMap,
+		Map<String, Object> searchFormMapWithPagination(Map<String, Object> sourceItem, Map<String, Object> inputFieldsMap, Map<String, Object> operationMap,
 				DataFetchingEnvironment environment) {
 			// TODO Auto-generated method stub
 			return null;
@@ -228,24 +293,28 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 	private List<Map<String, Object>> mergeWithConcreteValue(List<Map<String, Object>> interfaceValueList) {
 		Set<String> resolverValues = new HashSet<>();
 		interfaceValueList.forEach((Map<String, Object> it) -> {
-			resolverValues.add((String) it.get(resolverField));
+			if((String) it.get(resolverField) != null) {
+				resolverValues.add((String) it.get(resolverField));	
+			}
+			
 		});
+		
 		for (String resolverValue : resolverValues) {
 			InternalDataFetcher resolverFetcher = resolverFetcherMap.get(resolverValue);
 			if (resolverFetcher == null)
 				continue;
 
-			List<Map<String, Object>> filterValueList = interfaceValueList.stream().filter((it) -> ((String) it.get(resolverField)).equals(resolverValue)).collect(Collectors.toList());
-
-			List<Map<String, Object>> concreteValueList = resolverFetcher.searchFormMap(filterValueList, new HashMap(), null);
+			List<Map<String, Object>> filterValueList = interfaceValueList.stream().filter((it) -> (resolverValue).equals((String) it.get(resolverField))).collect(Collectors.toList());
+			List<Map<String, Object>> concreteValueList = resolverFetcher.searchFormMapList(null, new HashMap(), null);
 			concreteValueList.forEach((concreteValue) -> {
-				Map<String, Object> interValue = interfaceValueList.stream().filter((it) -> {
-					return it.get(primaryField).equals(concreteValue.get(primaryField));
-				}).collect(Collectors.toList()).get(0);
+				Map<String, Object> interValue = filterValueList.stream().filter((it) -> {
+					boolean res = it.get(primaryField).equals(concreteValue.get(primaryField));
+					return res;
+				}).findAny().orElse(null);
 				if (interValue != null)
 					interValue.putAll(concreteValue);
 			});
-		}
+		}		
 		return interfaceValueList;
 	}
 
@@ -274,9 +343,11 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 
 	@Override
 	Object fetch(DataFetchingEnvironment environment) {
+		int relKeyCount = relKeyMap.size();
 		Map<String, Object> inputFieldsMap = new HashMap<>();
 		Map<String, Object> operationMap = new HashMap<>();
 		Map<String, Object> resultMap = new HashMap<>();
+		Map<String, Object> interfaceValuedMap = null;
 		Map source = environment.getSource();
 		GraphQLSchemaUtil.transformArguments(environment.getArguments(), inputFieldsMap, operationMap);
 		if (operation.equals("one")) {
@@ -284,9 +355,64 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
 			mergeWithConcreteValue(resultMap);
 			return resultMap;
 		} else if (operation.equals("list")) {
-
+             Map<String, Object> edgesData;
+             List<Map<String, Object>> edgesDataList;
+             if (GraphQLSchemaUtil.requirePagination(environment)) {
+            	Map<String, Object> arguments = environment.getArguments();
+ 				Map<String, Object> paginationMap = (Map<String, Object>) arguments.get("pagination");
+            	int pageIndex = (int) paginationMap.get("pageIndex");
+ 				int pageSize = (int) paginationMap.get("pageSize");
+ 				int pageRangeLow = pageIndex * pageSize + 1;
+ 				int pageRangeHigh = (pageIndex * pageSize) + pageSize;
+            	interfaceValuedMap = defaultFetcher.searchFormMapWithPagination(source, inputFieldsMap, operationMap, environment);
+            	int count = (int)interfaceValuedMap.get("count");
+            	int pageMaxIndex = new BigDecimal(count - 1).divide(new BigDecimal(pageSize), 0, BigDecimal.ROUND_DOWN).intValue();
+            	Map<String, Object> pageInfo = new HashMap<String, Object>();
+            	boolean hasPreviousPage = pageIndex > 0;
+				pageInfo.put("pageIndex", pageIndex);
+				pageInfo.put("pageSize", pageSize);
+				pageInfo.put("pageRangeLow", pageRangeLow);
+				pageInfo.put("pageRangeHigh", pageRangeHigh);
+				pageInfo.put("hasPreviousPage", hasPreviousPage);
+ 				if (pageRangeHigh > count)
+ 					pageRangeHigh = count;
+ 				boolean hasNextPage = pageMaxIndex > pageIndex;
+ 				pageInfo.put("hasNextPage", hasNextPage);
+ 				pageInfo.put("totalCount", count);
+ 				List<Map<String, Object>> interfaceValueList = (List<Map<String, Object>>)interfaceValuedMap.get("data");
+ 				interfaceValueList = mergeWithConcreteValue(interfaceValueList);
+ 				edgesDataList = new ArrayList<Map<String, Object>>(interfaceValueList != null ? interfaceValueList.size() : 0);
+ 				String cursor = null;
+ 				pageInfo.put("startCursor", GraphQLSchemaUtil.encodeRelayCursor(interfaceValueList.get(0), Arrays.asList(primaryField))); //TODO
+ 				pageInfo.put("endCursor", GraphQLSchemaUtil.encodeRelayCursor(interfaceValueList.get(interfaceValueList.size() - 1),  Arrays.asList(primaryField))); //TODO
+ 				for (Map<String, Object> gv : interfaceValueList) {
+ 					edgesData = new HashMap<>(2);
+ 					cursor = GraphQLSchemaUtil.encodeRelayCursor(gv,  Arrays.asList(primaryField));
+ 					edgesData.put("cursor", cursor); //TODO
+ 					edgesData.put("node", gv);
+ 					edgesDataList.add(edgesData);
+ 				}
+ 				resultMap.put("edges", edgesDataList);	
+ 				resultMap.put("pageInfo", pageInfo);     	 
+            	
+             } else {
+            	 List<Map<String, Object>> interfaceValueList = defaultFetcher.searchFormMapList(source, inputFieldsMap, environment);
+            	 interfaceValueList = mergeWithConcreteValue(interfaceValueList); 
+            	 List<Map<String, Object>> jointOneList = relKeyCount == 0 ? interfaceValueList : interfaceValueList.stream().filter((list) -> {
+            		 return matchParentByRelKeyMap(source, list, relKeyMap);
+            	 }).collect(Collectors.toList());
+            	edgesDataList = new ArrayList<Map<String, Object>>(jointOneList != null ? jointOneList.size() : 0);
+ 				String cursor = null;
+ 					for (Map<String, Object> gv : jointOneList) {
+ 						edgesData = new HashMap<>(2);
+ 						edgesData.put("node", gv);
+ 						edgesDataList.add(edgesData);
+ 					}
+ 					resultMap = new HashMap<>(1);
+ 	                resultMap.put("edges", edgesDataList);
+             }
 		}
-		return null;
+		return resultMap;
 	}
 
 }
