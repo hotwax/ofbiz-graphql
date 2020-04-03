@@ -633,6 +633,7 @@ public class GraphQLSchemaDefinition {
 			this.description = description;
 			this.type = "object";
 			this.fieldDefMap.putAll(fieldDefMap);
+			this.interfaceList.addAll(interfaceList);
 			this.delegator = delegator;
 			this.dispatcher = dispatcher;
 		}
@@ -1274,12 +1275,12 @@ public class GraphQLSchemaDefinition {
 		GraphQLTypeDefinition mutationTypeDef = getTypeDef(mutationRootObjectTypeName);
 
 		TreeNode<GraphQLTypeDefinition> rootNode = new TreeNode<>(null);
-		TreeNode<GraphQLTypeDefinition> queryTypeNode = new TreeNode<GraphQLTypeDefinition>(queryTypeDef);
 		TreeNode<GraphQLTypeDefinition> interfaceNode = new TreeNode<>(null);
 
 		for (Map.Entry<String, InterfaceTypeDefinition> entry : interfaceTypeDefMap.entrySet())
 			interfaceNode.children.add(new TreeNode<GraphQLTypeDefinition>((InterfaceTypeDefinition) entry.getValue()));
 
+		TreeNode<GraphQLTypeDefinition> queryTypeNode = new TreeNode<GraphQLTypeDefinition>(queryTypeDef);
 		rootNode.children.add(queryTypeNode);
 
 		List<String> objectTypeNames = new ArrayList<>(
