@@ -142,20 +142,23 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 				boolean hasNextPage = pageMaxIndex > pageIndex;
 				pageInfo.put("hasNextPage", hasNextPage);
 				pageInfo.put("totalCount", count);
-				edgesDataList = new ArrayList<Map<String, Object>>(result != null ? result.size() : 0);
-				String cursor = null;
-				if (interfaceEntityName == null || interfaceEntityName.isEmpty() || entityName.equals(interfaceEntityName)) {
-					pageInfo.put("startCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(0), pkFieldNames)); //TODO
-					pageInfo.put("endCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(result.size() - 1), pkFieldNames)); //TODO
-					for (GenericValue gv : result) {
-						edgesData = new HashMap<>(2);
-						cursor = GraphQLSchemaUtil.encodeRelayCursor(gv, pkFieldNames);
-						edgesData.put("cursor", cursor); //TODO
-						edgesData.put("node", gv);
-						edgesDataList.add(edgesData);
+				edgesDataList = new ArrayList<Map<String, Object>>(result.size());
+				if(UtilValidate.isNotEmpty(result)) {	
+					String cursor = null;
+					if (interfaceEntityName == null || interfaceEntityName.isEmpty() || entityName.equals(interfaceEntityName)) {
+						pageInfo.put("startCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(0), pkFieldNames)); //TODO
+						pageInfo.put("endCursor", GraphQLSchemaUtil.encodeRelayCursor(result.get(result.size() - 1), pkFieldNames)); //TODO
+						for (GenericValue gv : result) {
+							edgesData = new HashMap<>(2);
+							cursor = GraphQLSchemaUtil.encodeRelayCursor(gv, pkFieldNames);
+							edgesData.put("cursor", cursor); //TODO
+							edgesData.put("node", gv);
+							edgesDataList.add(edgesData);
+						}
 					}
+					resultMap.put("pageInfo", pageInfo);
 				}
-				resultMap.put("pageInfo", pageInfo);
+				
 			} else {
 				try {
 					result = delegator.findList(entityName, EntityCondition.makeCondition(entityConditions), null, null, options, false);

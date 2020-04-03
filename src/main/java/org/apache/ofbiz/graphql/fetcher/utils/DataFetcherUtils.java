@@ -105,9 +105,9 @@ public class DataFetcherUtils {
 					if (!isValEmpty) {
 						EntityComparisonOperator<?, ?> eq_operator = not ? EntityOperator.NOT_EQUAL : EntityOperator.EQUALS;
 						if (ic) {
-							entityConditions.add(EntityCondition.makeCondition(EntityFunction.UPPER_FIELD(fieldName), eq_operator, EntityFunction.UPPER(value)));
+							entityConditions.add(EntityCondition.makeCondition(EntityFunction.UPPER_FIELD(fieldName), eq_operator, EntityFunction.UPPER(value.trim())));
 						} else {
-							entityConditions.add(EntityCondition.makeCondition(fieldName, eq_operator, value));
+							entityConditions.add(EntityCondition.makeCondition(fieldName, eq_operator, value.trim()));
 						}
 
 					}
