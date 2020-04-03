@@ -570,6 +570,8 @@ public class GraphQLSchemaDefinition {
 
 			// Make object type that interface convert from extends interface automatically.
 			objectTypeDef.interfaceList.add(name);
+			resolverMap.put(objectTypeDef.name.toUpperCase(), objectTypeDef.name); // Hack to avoid error if the resolved type is 
+			// the one interface was extended from
 		}
 
 		public void addResolver(String resolverValue, String resolverType) {
