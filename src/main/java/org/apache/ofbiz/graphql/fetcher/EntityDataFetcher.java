@@ -120,7 +120,7 @@ public class EntityDataFetcher extends BaseEntityDataFetcher {
 				String orderBy = (String) paginationMap.get("orderByField");
 				options.setLimit(pageSize);
 				options.setMaxRows(pageSize);
-				options.setOffset(pageSize * pageIndex);
+				options.setOffset(pageIndex);
 				Map<String, Object> pageInfo = new HashMap<String, Object>();
 				pageInfo.put("pageIndex", pageIndex);
 				pageInfo.put("pageSize", pageSize);
