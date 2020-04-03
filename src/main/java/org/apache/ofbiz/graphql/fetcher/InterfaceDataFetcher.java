@@ -405,6 +405,8 @@ public class InterfaceDataFetcher extends BaseDataFetcher {
  				String cursor = null;
  					for (Map<String, Object> gv : jointOneList) {
  						edgesData = new HashMap<>(2);
+ 						cursor = GraphQLSchemaUtil.encodeRelayCursor(gv,  Arrays.asList(primaryField));
+ 						edgesData.put("cursor", cursor);
  						edgesData.put("node", gv);
  						edgesDataList.add(edgesData);
  					}
