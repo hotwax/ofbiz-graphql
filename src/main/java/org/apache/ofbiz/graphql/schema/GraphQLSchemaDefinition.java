@@ -1697,7 +1697,7 @@ public class GraphQLSchemaDefinition {
         if (connectionType == null) {
             connectionType = GraphQLObjectType.newObject().name(connectionTypeName)
                     .field(getEdgesField(rawType, nonNull, listItemNonNull))
-                    .field(getGraphQLFieldWithNoArgs("pageInfo", pageInfoType, "true", "false", "false", null))
+                    .field(getGraphQLFieldWithNoArgs("pageInfo", pageInfoType, "false", "false", "false", null))
                     .build();
             graphQLOutputTypeMap.put(connectionTypeName, connectionType);
         }
