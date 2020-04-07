@@ -157,33 +157,12 @@ public class ServiceDataFetcher extends BaseDataFetcher {
 				}
 			} else {
 				result = dispatcher.runSync(serviceName, inputFieldsMap);
-				if (ServiceUtil.isSuccess(result)) {
-					if (result.get("_graphql_result_") instanceof List) {
-						Map<String, Object> edgesData;
-						List<Map<String, Object>> resultList = (List<Map<String, Object>>) result.get("_graphql_result_");
-						List<Map<String, Object>> edgesDataList = new ArrayList<Map<String, Object>>(resultList != null ? resultList.size() : 0);
-						for (Map gv : resultList) {
-							edgesData = new HashMap<>(2);
-							edgesData.put("node", gv);
-							edgesDataList.add(edgesData);
-						}
-						result.clear();
-						result.put("edges", edgesDataList);
-						return result;
-					}
-
-				}
-
 			}
 		} catch (GenericServiceException e) {
            e.printStackTrace();
 		}
-
-		if (ServiceUtil.isSuccess(result)) {
-			return result.get("_graphql_result_");
-		} else {
-			return ServiceUtil.getErrorMessage(result);
-		}
+		
+		return result;
 	}
 	
 	private boolean isCRUDService() {

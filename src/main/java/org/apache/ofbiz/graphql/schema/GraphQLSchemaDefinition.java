@@ -964,9 +964,9 @@ public class GraphQLSchemaDefinition {
 					boolean argIsList = false;
 					String argType;
 					switch (paramType) {
-					case "org.apache.ofbiz.graphql.OperationInputType": argType = "OperationInputType"; break;
-	                case "org.apache.ofbiz.graphql.DateRangeInputType": argType = "DateRangeInputType"; break;
-	                case "org.apache.ofbiz.graphql.PaginationInputType": argType = "PaginationInputType"; break;
+					case "org.apache.ofbiz.graphql.schema.OperationInputType": argType = "OperationInputType"; break;
+	                case "org.apache.ofbiz.graphql.schema.DateRangeInputType": argType = "DateRangeInputType"; break;
+	                case "org.apache.ofbiz.graphql.schema.PaginationInputType": argType = "PaginationInputType"; break;
 					case "List":
 						argIsList = true;
 						argType = GraphQLSchemaUtil.camelCaseToUpperCamel(this.name) + "_" + paramName;
@@ -1928,11 +1928,11 @@ public class GraphQLSchemaDefinition {
 
 			}
 			break;
-		case "org.apache.ofbiz.graphql.PaginationInputType":
+		case "org.apache.ofbiz.graphql.schema.PaginationInputType":
 			return paginationInputType;
-		case "org.apache.ofbiz.graphql.OperationInputType":
+		case "org.apache.ofbiz.graphql.schema.OperationInputType":
 			return operationInputType;
-		case "org.apache.ofbiz.graphql.DateRangeInputType":
+		case "org.apache.ofbiz.graphql.schema.DateRangeInputType":
 			return dateRangeInputType;
 		case "graphql.schema.DataFetchingEnvironment":
 			return null;

@@ -300,18 +300,18 @@ public class GraphQLSchemaUtil {
 				continue;
 			ModelParam paramNode = sd.getParam(paramName);
 			if (paramNode == null)
-				throw new IllegalArgumentException("Service ${sd.serviceName} missing in parameter ${paramName}");
+				throw new IllegalArgumentException("Service "+sd.name+" missing in parameter "+paramName);
 			if (!paramNode.isIn()) {
 				throw new IllegalArgumentException("The Param Was not IN");
 			}
 			String paramType = paramNode.getType();
 			Object paramJavaTypeValue;
 			switch (paramType) {
-            case "org.apache.ofbiz.graphql.OperationInputType":
+            case "org.apache.ofbiz.graphql.schema.OperationInputType":
                 paramJavaTypeValue = new OperationInputType((Map)entry.getValue()); break;
-            case "org.apache.ofbiz.graphql.DateRangeInputType":
+            case "org.apache.ofbiz.graphql.schema.DateRangeInputType":
                 paramJavaTypeValue = new DateRangeInputType((Map)entry.getValue()); break;
-            case "org.apache.ofbiz.graphql.PaginationInputType":
+            case "org.apache.ofbiz.graphql.schema.PaginationInputType":
                 paramJavaTypeValue = new PaginationInputType((Map)entry.getValue()); break;
             default:
                 paramJavaTypeValue = castValueToJavaType(entry.getValue(), paramType); break;
@@ -488,7 +488,7 @@ public class GraphQLSchemaUtil {
         return encodeRelayId(ev, pkFieldNames);
     }
 
-    static String encodeRelayId(Map<String, Object> ev, List<String> pkFieldNames) {
+    public static String encodeRelayId(Map<String, Object> ev, List<String> pkFieldNames) {
         if (pkFieldNames.size() == 0) throw new IllegalArgumentException("Entity value must have primary keys to generate id");
         Object pkFieldValue0 = ev.get(pkFieldNames.get(0));
         if (pkFieldValue0 instanceof Timestamp) pkFieldValue0 = ((Timestamp) pkFieldValue0).getTime();
