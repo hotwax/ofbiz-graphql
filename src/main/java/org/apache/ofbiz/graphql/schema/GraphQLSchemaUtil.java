@@ -29,7 +29,7 @@ import static graphql.Scalars.GraphQLInt;
 import static graphql.Scalars.GraphQLLong;
 import static graphql.Scalars.GraphQLShort;
 import static graphql.Scalars.GraphQLString;
-import static org.apache.ofbiz.graphql.Scalars.GraphQLTimestamp;
+import static org.apache.ofbiz.graphql.Scalars.GraphQLDateTime;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -89,7 +89,8 @@ public class GraphQLSchemaUtil {
 		graphQLScalarTypes.put("BigDecimal", GraphQLBigDecimal);
 		graphQLScalarTypes.put("Short", GraphQLShort);
 		graphQLScalarTypes.put("Long", GraphQLLong);
-		graphQLScalarTypes.put("Timestamp", GraphQLTimestamp);
+		graphQLScalarTypes.put("Timestamp", GraphQLDateTime);
+		graphQLScalarTypes.put("DateTime", GraphQLDateTime);
 
 		fieldTypeGraphQLMap.put("id", "ID");
 		fieldTypeGraphQLMap.put("indicator", "String");

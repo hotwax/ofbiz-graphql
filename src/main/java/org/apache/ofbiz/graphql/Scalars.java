@@ -20,6 +20,9 @@ package org.apache.ofbiz.graphql;
 
 import java.math.BigInteger;
 import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.util.TimeZone;
+
 import graphql.GraphQLException;
 import graphql.language.IntValue;
 import graphql.language.StringValue;
@@ -33,7 +36,7 @@ public class Scalars {
 	private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
 	private static final BigInteger LONG_MIN = BigInteger.valueOf(Long.MIN_VALUE);
 
-	public static GraphQLScalarType GraphQLTimestamp = GraphQLScalarType.newScalar().name("Timestamp").description("Timestamp Custom Type").coercing(new Coercing<Object, Object>() {
+	public static GraphQLScalarType GraphQLDateTime = GraphQLScalarType.newScalar().name("DateTime").description("An ISO-8601 encoded UTC date time string. Example value: \"2019-07-03T20:47:55Z\".").coercing(new Coercing<Object, Object>() {
 
 		@Override
 		public Object serialize(Object dataFetcherResult) throws CoercingSerializeException {
@@ -43,7 +46,7 @@ public class Scalars {
             } else if (dataFetcherResult instanceof Long) {
                 return new Timestamp((Long)dataFetcherResult).getTime();
             } else if (dataFetcherResult instanceof Timestamp) {
-                return ((Timestamp)dataFetcherResult).getTime();
+                return formatDateTimeToUTC((Timestamp)dataFetcherResult);
             }
             return null;
 		}
@@ -73,6 +76,12 @@ public class Scalars {
                 return new Timestamp(value.longValue());
             }
             return null;
+		}
+		
+		private String formatDateTimeToUTC(Timestamp ts) {
+			 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+			 sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+			 return sdf.format(ts);
 		}
 		
 	}).build();

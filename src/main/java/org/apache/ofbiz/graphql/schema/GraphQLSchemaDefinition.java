@@ -1999,6 +1999,8 @@ public class GraphQLSchemaDefinition {
 		}
 		if (inputFieldDef.nonNull)
 			wrapperType = new GraphQLNonNull(wrapperType);
+		
+		System.out.println("wrapperType "+wrapperType+", inputFieldDef.type "+inputFieldDef.type);
 
 		GraphQLInputObjectField inputField = GraphQLInputObjectField.newInputObjectField().name(inputFieldDef.name)
 				.type(wrapperType).defaultValue(inputFieldDef.defaultValue).description(inputFieldDef.description)
