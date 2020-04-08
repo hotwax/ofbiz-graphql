@@ -184,9 +184,6 @@ public class GraphQLSchemaUtil {
 		for (String fieldName : allFields) {
 			ModelField field = ed.getField(fieldName);
 			String fieldScalarType = fieldTypeGraphQLMap.get(field.getType());
-			if (fieldScalarType != null && fieldScalarType.equals("Timestamp")) {
-				continue;
-			}
 			Map<String, String> fieldPropertyMap = new HashMap<>();
 			if (field.getIsPk() || field.getIsNotNull()) {
 				fieldPropertyMap.put("nonNull", "true");
