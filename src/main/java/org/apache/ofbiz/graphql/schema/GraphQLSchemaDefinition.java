@@ -129,6 +129,7 @@ public class GraphQLSchemaDefinition {
     protected static GraphQLArgument paginationArgument;
     protected static GraphQLArgument ifArgument;
     protected static GraphQLInputObjectField clientMutationIdInputField;
+    private static GraphQLCodeRegistry.Builder codeRegistryBuilder = GraphQLCodeRegistry.newCodeRegistry();
 
 	static {
 		createPredefinedGraphQLTypes();
@@ -1340,10 +1341,6 @@ public class GraphQLSchemaDefinition {
 	public GraphQLSchema generateSchema() {
 		addSchemaInputTypes();
 		populateSortedTypes();
-//		System.out.println("allTypeDefSortedList "+allTypeDefSortedList);
-//		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
-//			System.out.println("objectDef : "+((ObjectTypeDefinition) typeDef).name+", type "+((ObjectTypeDefinition) typeDef).type);
-//		}
 		
 		for (GraphQLTypeDefinition typeDef : allTypeDefSortedList) {
 			switch (typeDef.type) {
@@ -1367,6 +1364,9 @@ public class GraphQLSchemaDefinition {
 			GraphQLObjectType schemaMutationType = graphQLObjectTypeMap.get(this.mutationRootObjectTypeName);
 			schemaBuilder = schemaBuilder.mutation(schemaMutationType);
 		}
+		
+		schemaBuilder.codeRegistry(codeRegistryBuilder.build());
+		
 		return schemaBuilder.build();
 	}
 	
