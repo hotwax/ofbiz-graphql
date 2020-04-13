@@ -161,16 +161,16 @@ public class GraphQLSchemaDefinition {
         
         // Predefined GraphQLObject
         pageInfoType = GraphQLObjectType.newObject().name("GraphQLPageInfo")
-                .field(getGraphQLFieldWithNoArgs("pageIndex", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("pageSize", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("totalCount", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("pageMaxIndex", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("pageRangeLow", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("pageRangeHigh", GraphQLInt, ""))
-                .field(getGraphQLFieldWithNoArgs("hasPreviousPage", GraphQLBoolean, "hasPreviousPage will be false if the client is not paginating with last, or if the client is paginating with last, and the server has determined that the client has reached the end of the set of edges defined by their cursors."))
-                .field(getGraphQLFieldWithNoArgs("hasNextPage", GraphQLBoolean, "hasNextPage will be false if the client is not paginating with first, or if the client is paginating with first, and the server has determined that the client has reached the end of the set of edges defined by their cursors"))
-                .field(getGraphQLFieldWithNoArgs("startCursor", GraphQLString, ""))
-                .field(getGraphQLFieldWithNoArgs("endCursor", GraphQLString, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","pageIndex", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","pageSize", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","totalCount", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","pageMaxIndex", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","pageRangeLow", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","pageRangeHigh", GraphQLInt, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","hasPreviousPage", GraphQLBoolean, "hasPreviousPage will be false if the client is not paginating with last, or if the client is paginating with last, and the server has determined that the client has reached the end of the set of edges defined by their cursors."))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","hasNextPage", GraphQLBoolean, "hasNextPage will be false if the client is not paginating with first, or if the client is paginating with first, and the server has determined that the client has reached the end of the set of edges defined by their cursors"))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","startCursor", GraphQLString, ""))
+                .field(getGraphQLFieldWithNoArgs("GraphQLPageInfo","endCursor", GraphQLString, ""))
                 .build();
         graphQLObjectTypeMap.put("GraphQLPageInfo", pageInfoType);
         graphQLOutputTypeMap.put("GraphQLPageInfo", pageInfoType);
@@ -302,7 +302,7 @@ public class GraphQLSchemaDefinition {
 					break;
 				case "field":
 					fieldDefMap.put(childNode.getAttribute("name"),
-							new FieldDefinition(delegator, dispatcher, childNode));
+							new FieldDefinition(this.name, delegator, dispatcher, childNode));
 					break;
 				case "exclude-field":
 					excludeFields.add(childNode.getAttribute("name"));
@@ -491,7 +491,7 @@ public class GraphQLSchemaDefinition {
 			fieldPropertyMap.put("nonNull", "true");
 			FieldDefinition fieldDef = getCachedFieldDefinition(fieldName, fieldTypeName, fieldPropertyMap.get("nonNull"), "false", "false");
 			if (fieldDef == null) {
-				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldTypeName, fieldPropertyMap);
+				fieldDef = new FieldDefinition(rootObjectTypeName, delegator, dispatcher, fieldName, fieldTypeName, fieldPropertyMap);
 				fieldDef.setDataFetcher(new EmptyDataFetcher(fieldDef));
 				putCachedFieldDefinition(fieldDef);
 			}
@@ -501,7 +501,7 @@ public class GraphQLSchemaDefinition {
 		if (fieldDefMap.size() == 0) {
 			Map<String, String> fieldPropertyMap = new HashMap<>();
 			fieldPropertyMap.put("nonNull", "false");
-			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, "empty", "String", fieldPropertyMap);
+			FieldDefinition fieldDef = new FieldDefinition(rootObjectTypeName, delegator, dispatcher, "empty", "String", fieldPropertyMap);
 			fieldDefMap.put("empty", fieldDef);
 		}
 		ObjectTypeDefinition objectTypeDef = new ObjectTypeDefinition(delegator, dispatcher, rootObjectTypeName, "", new ArrayList<String>(), fieldDefMap);
@@ -542,7 +542,7 @@ public class GraphQLSchemaDefinition {
 					this.description = childNode.getTextContent();
 					break;
 				case "field":
-					fieldDefMap.put(childNode.getAttribute("name"), new FieldDefinition(delegator, dispatcher, childNode));
+					fieldDefMap.put(childNode.getAttribute("name"), new FieldDefinition(this.name, delegator, dispatcher, childNode));
 					break;
 				}
 			}
@@ -625,7 +625,7 @@ public class GraphQLSchemaDefinition {
 					break;
 				case "field":
 					fieldDefMap.put(childNode.getAttribute("name"),
-							new FieldDefinition(delegator, dispatcher, childNode));
+							new FieldDefinition(this.name, delegator, dispatcher, childNode));
 					break;
 				}
 			}
@@ -733,7 +733,7 @@ public class GraphQLSchemaDefinition {
 					+ "isMutation=" + this.isMutation + ", argumentDefMap=" + this.argumentDefMap + "}";
 		}
 
-		String name, type, description, depreciationReason;
+		String name, type, description, depreciationReason, parent;
 		String nonNull, isList, listItemNonNull;
 		BaseDataFetcher dataFetcher;
 		Delegator delegator;
@@ -769,23 +769,24 @@ public class GraphQLSchemaDefinition {
 		String preDataFetcher, postDataFetcher;
 		Map<String, ArgumentDefinition> argumentDefMap = new LinkedHashMap<>();
 
-		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type) {
-			this(delegator, dispatcher, name, type, new HashMap<>(), null, new ArrayList<>());
+		FieldDefinition(String parent, Delegator delegator, LocalDispatcher dispatcher, String name, String type) {
+			this(parent, delegator, dispatcher, name, type, new HashMap<>(), null, new ArrayList<>());
 		}
 
-		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+		FieldDefinition(String parent, Delegator delegator, LocalDispatcher dispatcher, String name, String type,
 				Map<String, String> fieldPropertyMap) {
-			this(delegator, dispatcher, name, type, fieldPropertyMap, null, new ArrayList<>());
+			this(parent, delegator, dispatcher, name, type, fieldPropertyMap, null, new ArrayList<>());
 		}
 
 		// This constructor used by auto creation of master-detail field
-		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+		FieldDefinition(String parent, Delegator delegator, LocalDispatcher dispatcher, String name, String type,
 				Map<String, String> fieldPropertyMap, List<String> excludedFields) {
-			this(delegator, dispatcher, name, type, fieldPropertyMap, null, excludedFields);
+			this(parent, delegator, dispatcher, name, type, fieldPropertyMap, null, excludedFields);
 		}
 
-		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, String name, String type,
+		FieldDefinition(String parent, Delegator delegator, LocalDispatcher dispatcher, String name, String type,
 				Map<String, String> fieldPropertyMap, BaseDataFetcher dataFetcher, List<String> excludedArguments) {
+			this.parent = parent;
 			this.delegator = delegator;
 			this.name = name;
 			this.type = type;
@@ -799,7 +800,8 @@ public class GraphQLSchemaDefinition {
             addPeriodValidArguments();
 		}
 
-		FieldDefinition(Delegator delegator, LocalDispatcher dispatcher, Element node) {
+		FieldDefinition(String parent, Delegator delegator, LocalDispatcher dispatcher, Element node) {
+			this.parent = parent;
 			this.delegator = delegator;
 			this.dispatcher = dispatcher;
 			this.name = node.getAttribute("name");
@@ -1442,7 +1444,7 @@ public class GraphQLSchemaDefinition {
 			if (fakeFieldNameList.contains(entry.getKey()))
 				continue;
 
-			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, entry.getKey(), entry.getKey());
+			FieldDefinition fieldDef = new FieldDefinition("TypeReferenceContainer", delegator, dispatcher, entry.getKey(), entry.getKey());
 			graphQLObjectTypeBuilder.field(buildSchemaField(fieldDef));
 			fakeFieldNameList.add(entry.getKey());
 			hasFakeField = true;
@@ -1458,7 +1460,7 @@ public class GraphQLSchemaDefinition {
 				throw new IllegalArgumentException("GraphQLTypeDefinition [" + resolverType + "] not found");
 			addGraphQLObjectType((ObjectTypeDefinition) typeDef);
 
-			FieldDefinition fieldDef = new FieldDefinition(delegator, dispatcher, resolverType, resolverType);
+			FieldDefinition fieldDef = new FieldDefinition("TypeReferenceContainer", delegator, dispatcher, resolverType, resolverType);
 			graphQLObjectTypeBuilder.field(buildSchemaField(fieldDef));
 			fakeFieldNameList.add(resolverType);
 			hasFakeField = true;
@@ -1529,7 +1531,7 @@ public class GraphQLSchemaDefinition {
 		// TO-DO - Use of method is deprecated. Need to replace it with coderegistry
 		// implementation.
 		if (fieldDef.dataFetcher != null) {
-			graphQLFieldDefBuilder.dataFetcher(fieldDef.dataFetcher);
+			codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(fieldDef.parent, fieldDef.name), fieldDef.dataFetcher);
 		}
 		graphQLFieldDef = graphQLFieldDefBuilder.build();
 		return graphQLFieldDef;
@@ -1607,16 +1609,16 @@ public class GraphQLSchemaDefinition {
 	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(FieldDefinition fieldDef) {
 		if (fieldDef.getArgumentList().size() > 0)
 			throw new IllegalArgumentException("FieldDefinition [" + fieldDef.name + " ] with type [" + fieldDef.type + "] has arguments, which should not be cached");
-		return getGraphQLFieldWithNoArgs(fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
+		return getGraphQLFieldWithNoArgs(fieldDef.parent, fieldDef.name, fieldDef.type, fieldDef.nonNull, fieldDef.isList,
 				fieldDef.listItemNonNull, fieldDef.description, fieldDef.dataFetcher);
 	}
 
-	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String parent, String name, GraphQLOutputType rawType,
 			String description) {
-		return getGraphQLFieldWithNoArgs(name, rawType, "false", "false", "false", description, null);
+		return getGraphQLFieldWithNoArgs(parent, name, rawType, "false", "false", "false", description, null);
 	}
 
-	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, String rawTypeName, String nonNull,
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String parent, String name, String rawTypeName, String nonNull,
 			String isList, String listItemNonNull, String description, BaseDataFetcher dataFetcher) {
 		GraphQLOutputType rawType = graphQLOutputTypeMap.get(rawTypeName);
 		if (rawType == null) {
@@ -1626,15 +1628,15 @@ public class GraphQLSchemaDefinition {
 				graphQLTypeReferenceMap.put(rawTypeName, (GraphQLTypeReference) rawType);
 			}
 		}
-		return getGraphQLFieldWithNoArgs(name, rawType, nonNull, isList, listItemNonNull, description, dataFetcher);
+		return getGraphQLFieldWithNoArgs(parent, name, rawType, nonNull, isList, listItemNonNull, description, dataFetcher);
 	}
 
-	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String parent, String name, GraphQLOutputType rawType,
 			String nonNull, String isList, String listItemNonNull, BaseDataFetcher dataFetcher) {
-		return getGraphQLFieldWithNoArgs(name, rawType, nonNull, isList, listItemNonNull, "", dataFetcher);
+		return getGraphQLFieldWithNoArgs(parent, name, rawType, nonNull, isList, listItemNonNull, "", dataFetcher);
 	}
 
-	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String name, GraphQLOutputType rawType,
+	private static GraphQLFieldDefinition getGraphQLFieldWithNoArgs(String parent, String name, GraphQLOutputType rawType,
 			String nonNull, String isList, String listItemNonNull, String description, BaseDataFetcher dataFetcher) {
 		String fieldKey = getFieldKey(name, rawType.getName(), nonNull, isList, listItemNonNull);
 
@@ -1662,7 +1664,7 @@ public class GraphQLSchemaDefinition {
 			fieldBuilder.argument((GraphQLArgument) entry.getValue());
 
 		if (dataFetcher != null) {
-			fieldBuilder.dataFetcher(dataFetcher);
+			codeRegistryBuilder.dataFetcher(FieldCoordinates.coordinates(parent, name), dataFetcher);
 		}
 		field = fieldBuilder.build();
 		graphQLFieldMap.put(fieldKey, field);
@@ -1697,7 +1699,7 @@ public class GraphQLSchemaDefinition {
         if (connectionType == null) {
             connectionType = GraphQLObjectType.newObject().name(connectionTypeName)
                     .field(getEdgesField(rawType, nonNull, listItemNonNull))
-                    .field(getGraphQLFieldWithNoArgs("pageInfo", pageInfoType, "false", "false", "false", null))
+                    .field(getGraphQLFieldWithNoArgs(connectionTypeName,"pageInfo", pageInfoType, "false", "false", "false", null))
                     .build();
             graphQLOutputTypeMap.put(connectionTypeName, connectionType);
         }
@@ -1743,7 +1745,7 @@ public class GraphQLSchemaDefinition {
 
         GraphQLObjectType edgeRawType = graphQLObjectTypeMap.get(edgeRawTypeName);
         if (edgeRawType == null) {
-            GraphQLFieldDefinition nodeField = getGraphQLFieldWithNoArgs("node", rawType, nonNull, "false", listItemNonNull, null);
+            GraphQLFieldDefinition nodeField = getGraphQLFieldWithNoArgs(edgeRawTypeName, "node", rawType, nonNull, "false", listItemNonNull, null);
 
             edgeRawType = GraphQLObjectType.newObject().name(edgeRawTypeName)
                     .field(cursorField)

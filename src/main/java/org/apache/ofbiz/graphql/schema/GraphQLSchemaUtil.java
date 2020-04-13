@@ -175,7 +175,7 @@ public class GraphQLSchemaUtil {
 			GraphQLSchemaDefinition.FieldDefinition idFieldDef = GraphQLSchemaDefinition.getCachedFieldDefinition("id",
 					"ID", "false", "false", "false");
 			if (idFieldDef == null) {
-				idFieldDef = new GraphQLSchemaDefinition.FieldDefinition(delegator, dispatcher, "id", "ID",
+				idFieldDef = new GraphQLSchemaDefinition.FieldDefinition(null, delegator, dispatcher, "id", "ID",
 						new HashMap<String, String>());
 				GraphQLSchemaDefinition.putCachedFieldDefinition(idFieldDef);
 			}
@@ -195,7 +195,7 @@ public class GraphQLSchemaUtil {
 					fieldPropertyMap.get("nonNull"), "false", "false");
 			if (fieldDef == null) {
 				//System.out.println("fieldName "+fieldName+", fieldScalarType "+fieldScalarType);
-				fieldDef = new FieldDefinition(delegator, dispatcher, fieldName, fieldScalarType, fieldPropertyMap);
+				fieldDef = new FieldDefinition(null, delegator, dispatcher, fieldName, fieldScalarType, fieldPropertyMap);
 				GraphQLSchemaDefinition.putCachedFieldDefinition(fieldDef);
 			}
 			fieldDefMap.put(fieldName, fieldDef);
@@ -404,7 +404,7 @@ public class GraphQLSchemaUtil {
 				}
 			}
 		} else {
-			fieldDef = new FieldDefinition(delegator, dispatcher, fieldNode);
+			fieldDef = new FieldDefinition(null, delegator, dispatcher, fieldNode);
 			fieldDefMap.put(fieldDef.name, fieldDef);
 		}
 	}
