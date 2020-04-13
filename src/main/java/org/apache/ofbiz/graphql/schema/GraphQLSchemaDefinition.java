@@ -1390,17 +1390,15 @@ public class GraphQLSchemaDefinition {
 		if (!interfaceTypeDef.convertFromObjectTypeName.isEmpty()) {
 			if (interfaceTypeDef.resolverField == null || interfaceTypeDef.resolverField.isEmpty())
 				throw new IllegalArgumentException("Interface definition of ${interfaceTypeName} resolverField not set");
-            interfaceTypeBuilder.typeResolver(new TypeResolver() {
-                @Override
-                public GraphQLObjectType getType(TypeResolutionEnvironment env) {
-                    Object object = env.getObject();
-                    String resolverFieldValue = (String) ((Map) object).get(interfaceTypeDef.resolverField);
-                    String resolvedTypeName = interfaceTypeDef.resolverMap.get(resolverFieldValue);
-                    GraphQLObjectType resolvedType = graphQLObjectTypeMap.get(resolvedTypeName);
-                    if (resolvedType == null) resolvedType = graphQLObjectTypeMap.get(interfaceTypeDef.defaultResolvedTypeName);
-                    return resolvedType;
-                }
-            });
+			
+			codeRegistryBuilder.typeResolver(interfaceTypeName, (env) -> {
+				Object object = env.getObject();
+                String resolverFieldValue = (String) ((Map) object).get(interfaceTypeDef.resolverField);
+                String resolvedTypeName = interfaceTypeDef.resolverMap.get(resolverFieldValue);
+                GraphQLObjectType resolvedType = graphQLObjectTypeMap.get(resolvedTypeName);
+                if (resolvedType == null) resolvedType = graphQLObjectTypeMap.get(interfaceTypeDef.defaultResolvedTypeName);
+                return resolvedType;
+			});
 		}
 
 		interfaceType = interfaceTypeBuilder.build();
