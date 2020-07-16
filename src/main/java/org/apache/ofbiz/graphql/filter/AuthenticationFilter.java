@@ -64,7 +64,6 @@ public class AuthenticationFilter implements Filter {
 			throws IOException, ServletException {
 		HttpServletRequest httpRequest = (HttpServletRequest) request;
 		HttpServletResponse httpResponse = (HttpServletResponse) response;
-		if (!isIntrospectionQuery(httpRequest)) {
 			String authorizationHeader = httpRequest.getHeader(HttpHeaders.AUTHORIZATION);
 			if (!isTokenBasedAuthentication(authorizationHeader)) {
 				abortWithUnauthorized(httpResponse, false, "Authentication Required");
@@ -86,7 +85,6 @@ public class AuthenticationFilter implements Filter {
 				httpRequest.setAttribute("userLogin", userLogin);
 				httpRequest.setAttribute("delegator", delegator);
 			}
-		}
 		chain.doFilter(request, response);
 	}
 	

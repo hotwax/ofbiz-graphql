@@ -30,4 +30,45 @@ under the License.
         </description>
     </service> 
     
+    
+    <service name="buildConnection" engine="java" transaction-timeout="7200" location="org.apache.ofbiz.graphql.services.GraphQLServices" invoke="buildConnection" auth="true">
+	   <implements service="returnConnection"/>
+	   <attribute name="el" type="List" mode="IN" optional="false" />
+	   <attribute name="pageIndex" type="Integer" mode="IN" optional="false" default-value="0" />
+	   <attribute name="pageSize" type="Integer" mode="IN" optional="false" default-value="20"/>
+	   <attribute name="totalCount" type="Integer" mode="IN" optional="false" default-value="0"/>
+    </service>  
+    
+    <service name="buildConnectionByList" engine="java" transaction-timeout="7200" location="org.apache.ofbiz.graphql.services.GraphQLServices" invoke="buildConnectionByList" auth="true">
+	   <implements service="returnConnection"/>
+	   <attribute name="ed" type="List" mode="IN" optional="false" /> 
+	   <attribute name="pageIndex" type="Integer" mode="IN" optional="false" default-value="0" />
+	   <attribute name="pageSize" type="Integer" mode="IN" optional="false" default-value="20"/>
+	   <attribute name="totalCount" type="Integer" mode="IN" optional="false" default-value="0"/>
+	   <attribute name="type" type="String" mode="IN" optional="false" default-value="0"/>
+	   <attribute name="pkFieldNames" type="List" mode="IN" optional="false" /> 
+	   <attribute name="startCursor" type="String" mode="IN" optional="false" /> 
+	   <attribute name="endCursor" type="String" mode="IN" optional="false" />
+	   <attribute name="hasNextPage" type="Boolean" mode="IN" optional="false" />
+	   <attribute name="hasPreviousPage" type="Boolean" mode="IN" optional="false" />    
+    </service>
+    
+    <service name="buildPageInfo" engine="java" transaction-timeout="7200" location="org.apache.ofbiz.graphql.services.GraphQLServices" invoke="buildPageInfo" auth="true">
+	   <attribute name="pageIndex" type="Integer" mode="IN" optional="false" default-value="0" />
+	   <attribute name="pageSize" type="Integer" mode="IN" optional="false" default-value="20"/>
+	   <attribute name="totalCount" type="Integer" mode="IN" optional="false" default-value="0"/>
+	   <attribute name="type" type="String" mode="IN" optional="false" default-value="0"/>
+	   <attribute name="startCursor" type="String" mode="IN" optional="false" /> 
+	   <attribute name="endCursor" type="String" mode="IN" optional="false" /> 
+	   <attribute name="hasNextPage" type="Boolean" mode="IN" optional="false" />
+	   <attribute name="hasPreviousPage" type="Boolean" mode="IN" optional="false" /> 
+	   <attribute name="pageInfo" type="Map" mode="OUT" optional="false"/>
+    </service>   
+    
+    <service name="returnConnection" engine="interface" transaction-timeout="7200" location="" invoke="" auth="true">
+	   <description>Returns GraphQL Connection</description>
+	   <attribute name="edges" type="List" mode="OUT" optional="false" />
+	   <attribute name="pageInfo" type="Map" mode="OUT" optional="false" />
+    </service>    
+    
 </services>
