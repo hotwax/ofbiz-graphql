@@ -52,7 +52,7 @@ under the License.
 	</servlet-mapping>
 	<listener>
 		<listener-class>
-			org.apache.ofbiz.jersey.listerner.AppServletContextListener
+			org.apache.ofbiz.graphql.AppServletContextListener
 		</listener-class>
 	</listener>
 </web-app>
